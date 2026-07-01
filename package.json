@@ -1,0 +1,12 @@
+{
+  "name": "hanako-council-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "check": "npm run build && npm test"
+  },
+  "devDependencies": {}
+}
