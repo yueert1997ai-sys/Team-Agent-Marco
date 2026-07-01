@@ -1,14 +1,17 @@
 {
   "name": "hanako-council-mvp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "check": "npm run build && npm test"
+    "check": "npm run build && npm test",
+    "demo": "npm run build && node dist/src/demo/cli.js",
+    "demo:mock": "npm run build && node dist/src/demo/cli.js --mode mock"
   },
   "devDependencies": {
+    "@types/node": "^22.15.0",
     "typescript": "^5.9.3"
   }
 }
