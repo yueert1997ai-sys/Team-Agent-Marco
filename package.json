@@ -8,5 +8,7 @@
     "test": "npm run build && node --test tests/*.test.mjs",
     "check": "npm run build && npm test"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
 }
