@@ -1,10 +1,8 @@
 name: CI
-
 on:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -13,26 +11,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install dependencies
+      - name: Install
         run: npm install
-      - name: Compile TypeScript
-        id: compile
-        continue-on-error: true
-        run: npm run build:ts 2>&1 | tee compile.log
-      - name: Upload compiler diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: typescript-diagnostics
-          path: compile.log
-      - name: Stop after compiler failure
-        if: steps.compile.outcome == 'failure'
-        run: exit 1
-      - name: Copy UI assets
+      - name: Compile
+        run: npm run build:ts
+      - name: Copy UI
         run: npm run copy:ui
-      - name: Run council tests
+      - name: Council tests
         run: node --test tests/council.test.mjs tests/final-budget.test.mjs
-      - name: Run provider tests
+      - name: Provider tests
         run: node --test tests/providers.test.mjs
-      - name: Run desktop tests
-        run: node --test tests/settings.test.mjs tests/ui-smoke.test.mjs tests/demo-cli.test.mjs
+      - name: Settings tests
+        run: node --test tests/settings.test.mjs
+      - name: UI tests
+        run: node --test tests/ui-smoke.test.mjs
+      - name: Mock flow test
+        run: node --test tests/demo-cli.test.mjs
