@@ -3,7 +3,7 @@ name: Deploy HTML web app
 on:
   workflow_dispatch:
   push:
-    branches: [feature/council-mvp]
+    branches: [main, feature/council-mvp]
     paths:
       - "web/**"
       - ".github/workflows/pages.yml"
