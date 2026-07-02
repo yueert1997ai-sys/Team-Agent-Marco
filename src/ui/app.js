@@ -1,16 +1,253 @@
-const api=window.teamAgent;let settings=null,busy=false;const stages=new Map();
-const $=id=>document.getElementById(id),esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const pages={meeting:["召开会议","让多个模型独立判断、讨论并形成结论。"],agents:["Agent 团队","查看默认岗位和模型路由。"],settings:["API 设置","在程序里保存、替换和测试模型 API。"],history:["会议历史","查看过去的决策和本地记录。"]};
-window.addEventListener("DOMContentLoaded",async()=>{bind();api.onMeetingEvent(onMeetingEvent);await Promise.all([loadSettings(),loadHistory()])});
-function bind(){document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>showPage(b.dataset.page));document.querySelectorAll(".mode-option").forEach(x=>x.onclick=()=>{document.querySelectorAll(".mode-option").forEach(y=>y.classList.remove("selected"));x.classList.add("selected")});$("meetingForm").onsubmit=startMeeting;$("saveSettingsButton").onclick=saveSettings;$("refreshHistoryButton").onclick=loadHistory;$("chooseMeetingDirectory").onclick=async()=>{const d=await api.chooseMeetingDirectory();if(d)$("meetingOutputDir").value=d};document.querySelectorAll(".toggle-secret").forEach(b=>b.onclick=()=>{const i=$(b.dataset.target);i.type=i.type==="password"?"text":"password";b.textContent=i.type==="password"?"显示":"隐藏"});document.querySelectorAll(".test-provider").forEach(b=>b.onclick=()=>testProvider(b.dataset.provider,b))}
-function showPage(p){document.querySelectorAll(".nav").forEach(b=>b.classList.toggle("active",b.dataset.page===p));document.querySelectorAll(".page").forEach(s=>s.classList.toggle("active",s.id===`page-${p}`));$("pageTitle").textContent=pages[p][0];$("pageSubtitle").textContent=pages[p][1];if(p==="history")loadHistory()}
-async function startMeeting(e){e.preventDefault();if(busy)return;const topic=$("meetingTopic").value.trim();if(!topic)return toast("请填写会议议题",true);busy=true;$("startMeetingButton").disabled=true;$("meetingStatus").textContent="会议进行中";$("emptyTimeline").classList.add("hidden");$("meetingTimeline").classList.remove("hidden");$("meetingTimeline").replaceChildren();$("meetingResult").classList.add("hidden");stages.clear();try{const out=await api.startMeeting({topic,context:$("meetingContext").value.trim(),title:$("meetingTitle").value.trim(),mode:document.querySelector('input[name="meetingMode"]:checked').value});$("meetingStatus").textContent="会议完成";renderResult(out);await loadHistory();toast("会议完成并已保存")}catch(err){$("meetingStatus").textContent="运行失败";addStage("会议中止",readError(err),"error");toast(readError(err),true)}finally{busy=false;$("startMeetingButton").disabled=false}}
-function onMeetingEvent(e){if(e.type==="stage_started"){finishStages();const labels={first:["第一轮独立发言","各岗位并行判断"],digest:["主持人提炼分歧","提取共识和冲突"],second:["第二轮定向讨论","相关岗位回应分歧"],final:["最终仲裁","形成决策和行动项"]};stages.set(e.stage,addStage(...labels[e.stage],"active"))}else if(e.type==="member_completed")detail(e.stage,`✓ ${e.memberId} 完成`);else if(e.type==="member_failed")detail(e.stage,`✕ ${e.memberId}：${e.error}`);else if(e.type==="meeting_completed")finishStages()}
-function addStage(title,desc,state=""){const d=document.createElement("div");d.className=`timeline-item ${state}`;d.innerHTML=`<div class="timeline-copy"><strong>${esc(title)}</strong><small>${esc(desc)}</small><div class="timeline-details"></div></div>`;$("meetingTimeline").append(d);return d}function detail(stage,text){const box=stages.get(stage)?.querySelector(".timeline-details");if(box){const s=document.createElement("small");s.textContent=text;box.append(s)}}function finishStages(){document.querySelectorAll(".timeline-item.active").forEach(x=>{x.classList.remove("active");x.classList.add("done")})}
-function renderResult(out){const d=out.result.finalDecision;$("meetingResult").innerHTML=`<article class="result-hero"><small>FINAL DECISION</small><h2>${esc(d.decision)}</h2><p>${esc(d.summary)}</p><div class="result-meta"><span>${out.mode==="live"?"真实 API":"模拟会议"}</span><span>${esc(out.providerIds.join(" + "))}</span><span>${out.result.estimatedUsageTokens} tokens</span><span>置信度 ${Math.round(d.confidence*100)}%</span></div></article><div class="result-columns"><article class="card"><h3>决策依据</h3><ul>${d.rationale.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></article><article class="card"><h3>下一步行动</h3>${d.nextActions.map(x=>`<div class="action-item"><span>${esc(x.priority)}</span><p><b>${esc(x.owner)}</b><br>${esc(x.action)}</p></div>`).join("")}</article></div>`;$("meetingResult").classList.remove("hidden")}
-async function loadSettings(){try{settings=await api.getSettings();for(const [id,v] of Object.entries({geminiModel:settings.gemini.model,geminiBaseUrl:settings.gemini.baseUrl,deepSeekModel:settings.deepSeek.model,deepSeekBaseUrl:settings.deepSeek.baseUrl,timeoutMs:settings.timeoutMs,maxRetries:settings.maxRetries,retryBaseDelayMs:settings.retryBaseDelayMs,budgetTokens:settings.budgetTokens,maxOutputTokens:settings.maxOutputTokens,meetingOutputDir:settings.meetingOutputDir}))$(id).value=v;renderStatus()}catch(e){toast(readError(e),true)}}
-async function saveSettings(){const b=$("saveSettingsButton");b.disabled=true;try{settings=await api.saveSettings({geminiApiKey:$("geminiApiKey").value,clearGeminiApiKey:$("clearGeminiApiKey").checked,geminiModel:$("geminiModel").value,geminiBaseUrl:$("geminiBaseUrl").value,deepSeekApiKey:$("deepSeekApiKey").value,clearDeepSeekApiKey:$("clearDeepSeekApiKey").checked,deepSeekModel:$("deepSeekModel").value,deepSeekBaseUrl:$("deepSeekBaseUrl").value,timeoutMs:Number($("timeoutMs").value),maxRetries:Number($("maxRetries").value),retryBaseDelayMs:Number($("retryBaseDelayMs").value),budgetTokens:Number($("budgetTokens").value),maxOutputTokens:Number($("maxOutputTokens").value),meetingOutputDir:$("meetingOutputDir").value});$("geminiApiKey").value=$("deepSeekApiKey").value="";$("clearGeminiApiKey").checked=$("clearDeepSeekApiKey").checked=false;renderStatus();message("设置已保存，Key 已写入本机安全存储");toast("设置已保存")}catch(e){message(readError(e),true)}finally{b.disabled=false}}
-function renderStatus(){badge("geminiConfigured",settings.gemini.apiKeyConfigured);badge("deepSeekConfigured",settings.deepSeek.apiKeyConfigured);const n=+settings.gemini.apiKeyConfigured + +settings.deepSeek.apiKeyConfigured;$("providerSummary").textContent=n===2?"Gemini + DeepSeek 已配置":n===1?"1 个真实 Provider 已配置":"模拟模式可用";$("settingsWarningDot").classList.toggle("hidden",n>0);$("securityText").textContent=settings.encryptionAvailable?"API Key 由操作系统加密保护":"系统安全存储不可用"}function badge(id,ok){const x=$(id);x.textContent=ok?"已配置":"未配置";x.classList.toggle("ok",ok)}
-async function testProvider(p,b){const out=$(p==="gemini"?"geminiTestResult":"deepSeekTestResult");b.disabled=true;out.textContent="测试中…";try{const r=await api.testProvider(p);out.textContent=`连接成功 · ${r.model} · ${r.latencyMs} ms`}catch(e){out.textContent=`失败：${readError(e)}`}finally{b.disabled=false}}
-async function loadHistory(){const box=$("historyList");box.innerHTML='<div class="empty">读取中…</div>';try{const items=await api.listHistory();box.innerHTML=items.length?items.map(x=>`<article class="history-item"><div><b>${esc(x.title)}</b><p>${esc(x.decision||x.summary)}</p><small>${esc(x.createdAt)} · ${x.tokens} tokens</small></div><button class="secondary open-history" data-path="${esc(x.filePath)}">打开位置</button></article>`).join(""):'<div class="empty">还没有会议记录。</div>';box.querySelectorAll(".open-history").forEach(b=>b.onclick=()=>api.showItemInFolder(b.dataset.path))}catch(e){box.innerHTML=`<div class="empty">${esc(readError(e))}</div>`}}
-function message(t,error=false){const x=$("settingsMessage");x.textContent=t;x.className=`message${error?" error":""}`;x.classList.remove("hidden")}function toast(t,error=false){const x=$("toast");x.textContent=t;x.className=`toast${error?" error":""}`;x.classList.remove("hidden");setTimeout(()=>x.classList.add("hidden"),3000)}function readError(e){return e?.message||String(e)}
+const api = window.teamAgent;
+let settings = null;
+let activeConversationId = null;
+let sending = false;
+const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+
+window.addEventListener("DOMContentLoaded", async () => {
+  bindEvents();
+  api.onChatEvent(handleChatEvent);
+  await Promise.all([loadSettings(), loadConversationList()]);
+  resizeInput();
+});
+
+function bindEvents() {
+  $("newChatButton").onclick = newChat;
+  $("openSettingsButton").onclick = () => showPage("settings");
+  $("backToChatButton").onclick = () => showPage("chat");
+  $("chatForm").onsubmit = sendMessage;
+  $("chatInput").oninput = resizeInput;
+  $("chatInput").onkeydown = (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      $("chatForm").requestSubmit();
+    }
+  };
+  document.querySelectorAll(".suggestions button").forEach((button) => {
+    button.onclick = () => {
+      $("chatInput").value = button.textContent;
+      resizeInput();
+      $("chatInput").focus();
+    };
+  });
+  $("toggleUniversalKey").onclick = () => {
+    const input = $("universalApiKey");
+    input.type = input.type === "password" ? "text" : "password";
+    $("toggleUniversalKey").textContent = input.type === "password" ? "显示" : "隐藏";
+  };
+  $("detectKeyButton").onclick = detectAndSaveKey;
+  $("saveRuntimeButton").onclick = saveRuntime;
+  $("chooseDirectoryButton").onclick = chooseDirectory;
+}
+
+function showPage(page) {
+  $("chatPage").classList.toggle("active", page === "chat");
+  $("settingsPage").classList.toggle("active", page === "settings");
+}
+
+async function sendMessage(event) {
+  event.preventDefault();
+  const text = $("chatInput").value.trim();
+  if (!text || sending) return;
+  if (!hasProvider("openai")) {
+    showPage("settings");
+    toast("请先添加 OpenAI API Key，GPT-5.5 才能作为总控回答。", true);
+    return;
+  }
+  sending = true;
+  $("sendButton").disabled = true;
+  $("welcome").classList.add("hidden");
+  appendMessage({ role: "user", content: text, createdAt: new Date().toISOString() });
+  $("chatInput").value = "";
+  resizeInput();
+  setStatus("GPT-5.5 正在思考");
+  const placeholder = appendThinking();
+  try {
+    const result = await api.sendChat({ conversationId: activeConversationId || undefined, message: text });
+    activeConversationId = result.conversation.id;
+    placeholder.remove();
+    appendMessage(result.assistantMessage, result.consultedProviders, result.usageTokens);
+    $("conversationTitle").textContent = result.conversation.title;
+    setStatus(result.consultedProviders.length ? `GPT-5.5 已参考 ${result.consultedProviders.join("、")}` : "GPT-5.5 已回答");
+    await loadConversationList();
+  } catch (error) {
+    placeholder.remove();
+    appendMessage({ role: "assistant", content: `运行失败：${readError(error)}`, createdAt: new Date().toISOString() });
+    setStatus("发送失败");
+  } finally {
+    sending = false;
+    $("sendButton").disabled = false;
+    $("chatInput").focus();
+  }
+}
+
+function appendMessage(message, providers = [], tokens = 0) {
+  const node = document.createElement("article");
+  node.className = `message ${message.role}`;
+  const meta = message.role === "assistant" && (providers.length || tokens)
+    ? `<div class="message-meta">${providers.length ? `后台参考：${esc(providers.join("、"))}` : ""}${providers.length && tokens ? " · " : ""}${tokens ? `${tokens} tokens` : ""}</div>`
+    : "";
+  node.innerHTML = `<div class="avatar">${message.role === "user" ? "你" : "M"}</div><div><div class="bubble">${esc(message.content)}</div>${meta}</div>`;
+  $("messages").append(node);
+  $("messages").scrollTop = $("messages").scrollHeight;
+  return node;
+}
+
+function appendThinking() {
+  return appendMessage({ role: "assistant", content: "正在思考…", createdAt: new Date().toISOString() });
+}
+
+function handleChatEvent(event) {
+  if (event.type === "status") setStatus(event.text);
+  if (event.type === "provider_completed") setStatus(`${event.provider} 已完成后台分析，GPT-5.5 正在整合`);
+}
+
+function setStatus(text) {
+  $("chatStatus").textContent = text;
+}
+
+function newChat() {
+  activeConversationId = null;
+  $("conversationTitle").textContent = "新对话";
+  $("chatStatus").textContent = "GPT-5.5 将直接与你对话";
+  $("messages").innerHTML = `<div id="welcome" class="welcome"><div class="welcome-mark">M</div><h2>想聊什么，直接说</h2><p>GPT-5.5 固定负责最终回答。配置 Gemini 或 DeepSeek 后，它们只在后台提供辅助意见。</p><div class="suggestions"><button>帮我判断这个项目下一步怎么做</button><button>把我的想法整理成可执行计划</button><button>帮我检查一个决策有没有漏洞</button></div></div>`;
+  document.querySelectorAll(".suggestions button").forEach((button) => {
+    button.onclick = () => { $("chatInput").value = button.textContent; resizeInput(); $("chatInput").focus(); };
+  });
+  document.querySelectorAll(".conversation-item").forEach((item) => item.classList.remove("active"));
+  showPage("chat");
+}
+
+async function loadConversationList() {
+  const items = await api.listConversations();
+  const box = $("conversationList");
+  box.innerHTML = items.length
+    ? items.map((item) => `<button class="conversation-item${item.id === activeConversationId ? " active" : ""}" data-id="${esc(item.id)}" title="${esc(item.preview)}">${esc(item.title)}</button>`).join("")
+    : `<small>还没有对话</small>`;
+  box.querySelectorAll(".conversation-item").forEach((button) => button.onclick = () => openConversation(button.dataset.id));
+}
+
+async function openConversation(id) {
+  const conversation = await api.getConversation(id);
+  if (!conversation) return toast("对话记录不存在", true);
+  activeConversationId = conversation.id;
+  $("conversationTitle").textContent = conversation.title;
+  $("messages").replaceChildren();
+  conversation.messages.forEach((message) => appendMessage(message));
+  showPage("chat");
+  await loadConversationList();
+}
+
+async function loadSettings() {
+  settings = await api.getSettings();
+  $("consultExperts").checked = settings.consultExperts;
+  $("maxOutputTokens").value = settings.maxOutputTokens;
+  $("timeoutMs").value = settings.timeoutMs;
+  $("maxRetries").value = settings.maxRetries;
+  $("retryBaseDelayMs").value = settings.retryBaseDelayMs;
+  $("conversationDirectory").value = settings.conversationDirectory;
+  $("secureStorageBadge").textContent = settings.encryptionAvailable ? "本机加密可用" : "本机加密不可用";
+  renderProviders();
+  renderConnectionSummary();
+}
+
+async function detectAndSaveKey() {
+  const key = $("universalApiKey").value.trim();
+  if (!key) return detectMessage("请先粘贴 API Key。", true);
+  const button = $("detectKeyButton");
+  button.disabled = true;
+  button.textContent = "正在识别…";
+  try {
+    const result = await api.detectAndSaveApiKey(key);
+    settings = result.settings;
+    $("universalApiKey").value = "";
+    detectMessage(`已识别为 ${result.detected.label}，并安全保存。`);
+    renderProviders();
+    renderConnectionSummary();
+    toast(`${result.detected.label} 已连接`);
+  } catch (error) {
+    detectMessage(readError(error), true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "识别并保存";
+  }
+}
+
+function renderProviders() {
+  const box = $("providerList");
+  const connected = settings.providers.filter((provider) => provider.apiKeyConfigured);
+  if (!connected.length) {
+    box.innerHTML = `<div class="inline-message error">还没有连接模型。请先添加 OpenAI Key，GPT-5.5 才能回复。</div>`;
+    return;
+  }
+  box.innerHTML = connected.map((provider) => `<div class="provider-row"><div class="provider-title"><div class="provider-icon">${provider.id === "openai" ? "O" : provider.id === "gemini" ? "G" : "D"}</div><div><strong>${esc(provider.label)}${provider.primary ? " · 总控" : " · 辅助"}</strong><small>${provider.primary ? "固定使用 GPT-5.5 负责最终回答" : "只在后台提供参考"}</small></div></div>${provider.primary ? `<div class="fixed-model">GPT-5.5</div>` : `<input class="provider-model" data-provider="${provider.id}" value="${esc(provider.model)}" aria-label="模型">`}<button class="danger remove-provider" data-provider="${provider.id}">移除</button></div>`).join("");
+  box.querySelectorAll(".provider-model").forEach((input) => input.onchange = async () => {
+    settings = await api.updateProvider({ provider: input.dataset.provider, model: input.value });
+    toast("模型名称已更新");
+  });
+  box.querySelectorAll(".remove-provider").forEach((button) => button.onclick = async () => {
+    settings = await api.removeProvider(button.dataset.provider);
+    renderProviders();
+    renderConnectionSummary();
+    toast("已移除模型连接");
+  });
+}
+
+async function saveRuntime() {
+  try {
+    settings = await api.updateRuntime({
+      consultExperts: $("consultExperts").checked,
+      maxOutputTokens: Number($("maxOutputTokens").value),
+      timeoutMs: Number($("timeoutMs").value),
+      maxRetries: Number($("maxRetries").value),
+      retryBaseDelayMs: Number($("retryBaseDelayMs").value),
+      conversationDirectory: $("conversationDirectory").value
+    });
+    toast("运行偏好已保存");
+  } catch (error) {
+    toast(readError(error), true);
+  }
+}
+
+async function chooseDirectory() {
+  const directory = await api.chooseConversationDirectory();
+  if (directory) $("conversationDirectory").value = directory;
+}
+
+function renderConnectionSummary() {
+  const connected = settings.providers.filter((provider) => provider.apiKeyConfigured);
+  const openAI = hasProvider("openai");
+  $("connectionSummary").textContent = openAI
+    ? `GPT-5.5 已连接${connected.length > 1 ? ` · ${connected.length - 1} 个辅助模型` : ""}`
+    : "等待添加 OpenAI Key";
+}
+
+function hasProvider(id) {
+  return Boolean(settings?.providers.find((provider) => provider.id === id)?.apiKeyConfigured);
+}
+
+function detectMessage(text, error = false) {
+  const box = $("detectMessage");
+  box.textContent = text;
+  box.className = `inline-message${error ? " error" : ""}`;
+  box.classList.remove("hidden");
+}
+
+function resizeInput() {
+  const input = $("chatInput");
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+}
+
+function toast(text, error = false) {
+  const box = $("toast");
+  box.textContent = text;
+  box.className = `toast${error ? " error" : ""}`;
+  box.classList.remove("hidden");
+  setTimeout(() => box.classList.add("hidden"), 3200);
+}
+
+function readError(error) {
+  return error?.message || String(error);
+}

@@ -1,23 +1,21 @@
-import type { PublicAppSettings, AppSettingsPatch } from "../app/settings.js";
-import type { MeetingHistoryItem } from "../app/history.js";
-import type { StartMeetingInput, StartMeetingOutput } from "../app/meeting-service.js";
-import type { CouncilEvent } from "../types.js";
+import type { ProviderId, ProviderUpdatePatch, PublicAppSettings, RuntimeSettingsPatch } from "../app/settings.js";
+import type { ProviderDetectionResult } from "../app/provider-detection.js";
+import type { ChatConversation, ChatConversationSummary, ChatEvent, SendChatInput, SendChatOutput } from "../chat/types.js";
 
-export interface ProviderTestResult {
-  provider: "gemini" | "deepseek";
-  ok: boolean;
-  latencyMs: number;
-  model: string;
-  tokens: number;
+export interface DetectedProviderSaveResult {
+  detected: ProviderDetectionResult;
+  settings: PublicAppSettings;
 }
 
 export interface DesktopApi {
   getSettings(): Promise<PublicAppSettings>;
-  saveSettings(patch: AppSettingsPatch): Promise<PublicAppSettings>;
-  chooseMeetingDirectory(): Promise<string | null>;
-  testProvider(provider: "gemini" | "deepseek"): Promise<ProviderTestResult>;
-  startMeeting(input: StartMeetingInput): Promise<StartMeetingOutput>;
-  listHistory(): Promise<MeetingHistoryItem[]>;
-  showItemInFolder(filePath: string): Promise<void>;
-  onMeetingEvent(listener: (event: CouncilEvent) => void): () => void;
+  detectAndSaveApiKey(apiKey: string): Promise<DetectedProviderSaveResult>;
+  removeProvider(provider: ProviderId): Promise<PublicAppSettings>;
+  updateProvider(patch: ProviderUpdatePatch): Promise<PublicAppSettings>;
+  updateRuntime(patch: RuntimeSettingsPatch): Promise<PublicAppSettings>;
+  chooseConversationDirectory(): Promise<string | null>;
+  sendChat(input: SendChatInput): Promise<SendChatOutput>;
+  listConversations(): Promise<ChatConversationSummary[]>;
+  getConversation(id: string): Promise<ChatConversation | null>;
+  onChatEvent(listener: (event: ChatEvent) => void): () => void;
 }

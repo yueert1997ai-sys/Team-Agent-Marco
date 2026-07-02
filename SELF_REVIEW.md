@@ -1,28 +1,27 @@
-# Self-review
+# Self-review · v0.4.0
 
-## Verification completed
+## 用户需求落实
 
-- TypeScript strict compilation passes.
-- Nine automated tests pass.
-- No external runtime dependencies were added.
-- Meeting agents default to read-only access.
-- First-round outputs are isolated and run in parallel.
-- Second round is targeted to relevant members only.
-- Unknown member IDs in moderator routing are removed.
-- A member cannot return another member's ID without being rejected.
-- One failed member can be tolerated when the configured success threshold is met.
-- Reported token usage is checked against the configured soft budget.
+1. API 设置改为单一通用输入框，自动识别 OpenAI、Gemini、DeepSeek。
+2. GPT-5.5 固定为唯一总控和最终回答模型。
+3. 主界面改为普通聊天框，移除圆桌会议式交互。
+4. Gemini、DeepSeek 只在后台提供可选内部意见。
+5. 对话自动保存，支持从侧边栏继续历史对话。
 
-## Issues found and fixed during review
+## 技术检查
 
-1. A two-member council originally required two successful first-round speakers even though the moderator does not speak in round one. The default threshold now uses the actual first-round participant count.
-2. Optional `context` conflicted with TypeScript `exactOptionalPropertyTypes`; normalization now omits it when empty.
-3. The public index originally did not export the Hanako host API type; it now does.
-4. Added member-ID anti-impersonation validation after every member response.
+- TypeScript strict：通过
+- 自动测试：32 项通过，0 项失败
+- API 自动识别：覆盖 OpenAI、Gemini、无效 Key
+- GPT-5.5 强制路由：覆盖测试
+- 普通聊天持久化：覆盖测试
+- 辅助模型内部咨询：覆盖测试
+- UI 冒烟：确认只有单一 Key 输入框，且不存在会议页面
+- Preload 安全桥接：通过
 
-## Known integration gaps
+## 重要边界
 
-1. OpenHanako's current workflow `agent()` API does not expose a per-call `maxOutputTokens` option. The module keeps this setting for a later host API extension, but the current adapter intentionally does not forward an unsupported field.
-2. OpenHanako's hard token ceiling belongs to the outer Workflow UsageLedger (`args.budgetTokens`). The module can enforce reported usage, but the current host adapter cannot read UsageLedger totals. Production integration must create the council inside a budgeted workflow run.
-3. UI, persistent meeting storage, and API-key setup are not part of this backend milestone.
-4. This package was compiled and tested independently because the complete OpenHanako repository was not available in the execution container. It has not yet passed the full upstream repository test suite.
+- 独立桌面程序无法直接消耗 ChatGPT Plus/Pro 的当前对话额度。
+- 真实 GPT-5.5 回复需要 OpenAI API Key，并按 API Token 单独计费。
+- Key 自动识别需要联网调用各平台的模型列表接口，但不会产生文本生成 Token。
+- 当前回复为整段返回，尚未加入逐字流式显示。

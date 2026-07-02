@@ -1,6 +1,9 @@
 import type { ProviderRuntimeOptions } from "../providers/types.js";
 
 export interface RuntimeConfig {
+  openAIApiKey: string;
+  openAIModel: string;
+  openAIBaseUrl: string;
   geminiApiKey: string;
   geminiModel: string;
   geminiBaseUrl: string;
@@ -11,10 +14,14 @@ export interface RuntimeConfig {
   budgetTokens: number;
   maxOutputTokens: number;
   meetingOutputDir: string;
+  consultExperts: boolean;
 }
 
 export function readRuntimeConfig(): RuntimeConfig {
   return {
+    openAIApiKey: envString("OPENAI_API_KEY"),
+    openAIModel: envString("OPENAI_MODEL", "gpt-5.5"),
+    openAIBaseUrl: envString("OPENAI_BASE_URL", "https://api.openai.com/v1"),
     geminiApiKey: envString("GEMINI_API_KEY"),
     geminiModel: envString("GEMINI_MODEL", "gemini-3.5-flash"),
     geminiBaseUrl: envString("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
@@ -26,9 +33,10 @@ export function readRuntimeConfig(): RuntimeConfig {
       maxRetries: envInteger("API_MAX_RETRIES", 2, { min: 0, max: 5 }),
       retryBaseDelayMs: envInteger("API_RETRY_BASE_DELAY_MS", 800, { min: 100, max: 10_000 })
     },
-    budgetTokens: envInteger("COUNCIL_BUDGET_TOKENS", 12_000, { min: 500, max: 1_000_000 }),
-    maxOutputTokens: envInteger("COUNCIL_MAX_OUTPUT_TOKENS", 900, { min: 100, max: 4_000 }),
-    meetingOutputDir: envString("COUNCIL_OUTPUT_DIR", "meetings")
+    budgetTokens: envInteger("CHAT_BUDGET_TOKENS", 24_000, { min: 500, max: 1_000_000 }),
+    maxOutputTokens: envInteger("CHAT_MAX_OUTPUT_TOKENS", 4_000, { min: 100, max: 32_000 }),
+    meetingOutputDir: envString("CHAT_OUTPUT_DIR", "conversations"),
+    consultExperts: envBoolean("CONSULT_EXPERTS", true)
   };
 }
 
@@ -44,4 +52,12 @@ function envInteger(name: string, fallback: number, range?: { min?: number; max?
   if (range?.min != null && value < range.min) throw new Error(`${name} must be >= ${range.min}.`);
   if (range?.max != null && value > range.max) throw new Error(`${name} must be <= ${range.max}.`);
   return value;
+}
+
+function envBoolean(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return fallback;
 }

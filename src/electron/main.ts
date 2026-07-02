@@ -1,26 +1,24 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
-import { defaultMeetingDirectory, startMeeting, type StartMeetingInput } from "../app/meeting-service.js";
-import { listMeetingHistory } from "../app/history.js";
-import { createConfiguredProviders } from "../providers/factory.js";
-import type { AgentCallOptions } from "../types.js";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { detectProvider } from "../app/provider-detection.js";
+import type { ProviderId, ProviderUpdatePatch, RuntimeSettingsPatch } from "../app/settings.js";
+import { ChatService } from "../chat/chat-service.js";
+import type { SendChatInput } from "../chat/types.js";
 import { SecureSettingsStore } from "./secure-settings-store.js";
-import type { AppSettingsPatch } from "../app/settings.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let settingsStore: SecureSettingsStore;
-let meetingRunning = false;
+let chatRunning = false;
 
 app.whenReady().then(async () => {
   settingsStore = new SecureSettingsStore(
     app.getPath("userData"),
-    defaultMeetingDirectory(app.getPath("documents"))
+    path.join(app.getPath("documents"), "Team Agent Marco", "conversations")
   );
   registerIpcHandlers();
   createWindow();
-
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -34,8 +32,8 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1320,
     height: 860,
-    minWidth: 1050,
-    minHeight: 700,
+    minWidth: 980,
+    minHeight: 680,
     backgroundColor: "#0b0d12",
     title: "Team Agent Marco",
     webPreferences: {
@@ -45,7 +43,6 @@ function createWindow(): void {
       sandbox: true
     }
   });
-
   mainWindow.removeMenu();
   void mainWindow.loadFile(path.join(currentDirectory, "../ui/index.html"));
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -53,66 +50,39 @@ function createWindow(): void {
 
 function registerIpcHandlers(): void {
   ipcMain.handle("settings:get", () => settingsStore.getPublicSettings());
-  ipcMain.handle("settings:save", (_event, patch: AppSettingsPatch) => settingsStore.save(patch));
-  ipcMain.handle("settings:choose-meeting-directory", async () => {
+  ipcMain.handle("providers:detect-and-save", async (_event, apiKey: string) => {
+    const detected = await detectProvider(apiKey);
+    const settings = await settingsStore.saveProvider(detected.provider, apiKey, detected.defaultModel, detected.baseUrl);
+    return { detected, settings };
+  });
+  ipcMain.handle("providers:remove", (_event, provider: ProviderId) => settingsStore.removeProvider(provider));
+  ipcMain.handle("providers:update", (_event, patch: ProviderUpdatePatch) => settingsStore.updateProvider(patch));
+  ipcMain.handle("settings:update-runtime", (_event, patch: RuntimeSettingsPatch) => settingsStore.updateRuntime(patch));
+  ipcMain.handle("settings:choose-conversation-directory", async () => {
     const options = {
-      title: "选择会议记录保存位置",
+      title: "选择对话记录保存位置",
       properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">
     };
-    const result = mainWindow
-      ? await dialog.showOpenDialog(mainWindow, options)
-      : await dialog.showOpenDialog(options);
+    const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
-  ipcMain.handle("providers:test", async (_event, providerId: "gemini" | "deepseek") => {
-    const runtime = await settingsStore.getRuntimeConfig();
-    const provider = createConfiguredProviders(runtime).find((candidate) => candidate.id === providerId);
-    if (!provider) throw new Error(`${providerId === "gemini" ? "Gemini" : "DeepSeek"} API Key 尚未配置。`);
-
-    const model = providerId === "gemini" ? runtime.geminiModel : runtime.deepSeekModel;
-    const schema = {
-      type: "object",
-      additionalProperties: false,
-      required: ["ok"],
-      properties: { ok: { type: "boolean" } }
-    };
-    const options: AgentCallOptions = {
-      label: "连接测试",
-      access: "read",
-      schema,
-      maxOutputTokens: 80
-    };
-    const startedAt = Date.now();
-    const result = await provider.generate<{ ok: boolean }>({
-      prompt: "这是连接测试。只返回 JSON：{\"ok\":true}",
-      options,
-      model
-    });
-    return {
-      provider: providerId,
-      ok: result.value.ok === true,
-      latencyMs: Date.now() - startedAt,
-      model,
-      tokens: result.usage?.totalTokens ?? 0
-    };
-  });
-  ipcMain.handle("meeting:start", async (_event, input: StartMeetingInput) => {
-    if (meetingRunning) throw new Error("已有一场会议正在进行，请等待它结束。");
-    meetingRunning = true;
+  ipcMain.handle("chat:send", async (_event, input: SendChatInput) => {
+    if (chatRunning) throw new Error("上一条消息仍在处理中。");
+    chatRunning = true;
     try {
       const runtime = await settingsStore.getRuntimeConfig();
-      return await startMeeting(input, runtime, (event) => {
-        mainWindow?.webContents.send("meeting:event", event);
-      });
+      const service = new ChatService(runtime);
+      return await service.send(input, (event) => mainWindow?.webContents.send("chat:event", event));
     } finally {
-      meetingRunning = false;
+      chatRunning = false;
     }
   });
-  ipcMain.handle("history:list", async () => {
-    const runtime = await settingsStore.getRuntimeConfig();
-    return listMeetingHistory(runtime.meetingOutputDir);
+  ipcMain.handle("chat:list", async () => {
+    const service = new ChatService(await settingsStore.getRuntimeConfig());
+    return service.listConversations();
   });
-  ipcMain.handle("shell:show-item", async (_event, filePath: string) => {
-    shell.showItemInFolder(filePath);
+  ipcMain.handle("chat:get", async (_event, id: string) => {
+    const service = new ChatService(await settingsStore.getRuntimeConfig());
+    return service.getConversation(id);
   });
 }

@@ -1,10 +1,10 @@
 {
   "name": "team-agent-marco",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "main": "dist/src/electron/main.js",
-  "description": "A visual multi-model council desktop app for Marco.",
+  "description": "A GPT-5.5-led visual desktop assistant with optional expert models.",
   "author": "Marco",
   "scripts": {
     "build:ts": "tsc -p tsconfig.json",
@@ -27,20 +27,10 @@
     "appId": "com.marco.teamagent",
     "productName": "Team Agent Marco",
     "asar": true,
-    "files": [
-      "dist/**/*",
-      "package.json"
-    ],
-    "directories": {
-      "output": "release"
-    },
+    "files": ["dist/**/*", "package.json"],
+    "directories": {"output": "release"},
     "win": {
-      "target": [
-        {
-          "target": "portable",
-          "arch": ["x64"]
-        }
-      ],
+      "target": [{"target": "portable", "arch": ["x64"]}],
       "artifactName": "Team-Agent-Marco-${version}-${arch}.${ext}"
     }
   }
