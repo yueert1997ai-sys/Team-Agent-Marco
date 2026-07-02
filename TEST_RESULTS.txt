@@ -1,1 +1,15 @@
-Pending CI verification for the desktop interface commit.
+Command: npm run check
+Result: PASS
+
+TypeScript strict build: PASS
+Automated tests: 9 passed, 0 failed
+Covered cases:
+- Full two-round meeting
+- Early stop without disagreement
+- Partial member failure
+- Duplicate IDs
+- Disabled moderator
+- Two-member council threshold
+- Member-ID impersonation rejection
+- Token budget enforcement
+- Hanako adapter option forwarding

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'none'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Team Agent Marco</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><b>M</b><span><strong>Team Agent</strong><small>Marco Council</small></span></div>
+    <nav>
+      <button class="nav active" data-page="meeting">召开会议</button>
+      <button class="nav" data-page="agents">Agent 团队</button>
+      <button class="nav" data-page="settings">API 设置 <i id="settingsWarningDot"></i></button>
+      <button class="nav" data-page="history">会议历史</button>
+    </nav>
+    <div class="safe"><strong>本机安全存储</strong><small id="securityText">正在检查加密能力</small></div>
+  </aside>
+  <main>
+    <header><div><h1 id="pageTitle">召开会议</h1><p id="pageSubtitle">让多个模型独立判断、讨论并形成结论。</p></div><span id="providerSummary" class="pill">模拟模式可用</span></header>
+    <section id="page-meeting" class="page active">
+      <div class="two-col">
+        <article class="card">
+          <h2>新建圆桌会议</h2>
+          <form id="meetingForm">
+            <label>会议议题<textarea id="meetingTopic" rows="4" required placeholder="例如：电竞男头生成器下一步先做什么？"></textarea></label>
+            <label>补充背景<textarea id="meetingContext" rows="3" placeholder="预算、时间、用户、限制条件……"></textarea></label>
+            <label>会议标题<input id="meetingTitle" placeholder="留空自动生成"></label>
+            <div class="modes">
+              <label class="mode-option selected"><input type="radio" name="meetingMode" value="auto" checked>自动</label>
+              <label class="mode-option"><input type="radio" name="meetingMode" value="live">真实 API</label>
+              <label class="mode-option"><input type="radio" name="meetingMode" value="mock">模拟</label>
+            </div>
+            <button id="startMeetingButton" class="primary" type="submit"><span>召开会议</span></button>
+            <small>没有配置 Key 时会自动使用模拟模式。</small>
+          </form>
+        </article>
+        <article class="card">
+          <div class="row"><h2>会议进度</h2><span id="meetingStatus" class="pill">等待开始</span></div>
+          <div id="emptyTimeline" class="empty">会议开始后，这里会显示首轮发言、分歧提炼、第二轮讨论和最终仲裁。</div>
+          <div id="meetingTimeline" class="timeline hidden"></div>
+        </article>
+      </div>
+      <div id="meetingResult" class="hidden"></div>
+    </section>
+    <section id="page-agents" class="page">
+      <h2>默认圆桌团队</h2>
+      <div class="agent-grid">
+        <article class="card"><b>总控主持人</b><p>提炼共识与分歧，负责最终仲裁。</p><span>优先 Gemini</span></article>
+        <article class="card"><b>产品负责人</b><p>判断用户价值、MVP 与投入产出。</p><span>优先 DeepSeek</span></article>
+        <article class="card"><b>技术负责人</b><p>评估开发难度、稳定性和维护成本。</p><span>优先 Gemini</span></article>
+        <article class="card"><b>反方评审</b><p>寻找风险、错误假设和失败路径。</p><span>优先 DeepSeek</span></article>
+      </div>
+      <div class="card note">只配置一家 API 也可以运行，四个岗位会临时共用可用模型。</div>
+    </section>
+    <section id="page-settings" class="page">
+      <div class="row"><div><h2>API 设置</h2><p>直接在程序里保存或替换，Key 不写入 GitHub。</p></div><button id="saveSettingsButton" class="primary">保存全部设置</button></div>
+      <div id="settingsMessage" class="message hidden"></div>
+      <div class="settings-grid">
+        <article class="card provider">
+          <div class="row"><h3>Google Gemini</h3><span id="geminiConfigured" class="badge">未配置</span></div>
+          <label>API Key<div class="secret"><input id="geminiApiKey" type="password" autocomplete="off" placeholder="粘贴新 Key；留空保留旧 Key"><button class="toggle-secret" data-target="geminiApiKey" type="button">显示</button></div></label>
+          <label class="check"><input id="clearGeminiApiKey" type="checkbox">清除已保存 Key</label>
+          <label>模型<input id="geminiModel"></label>
+          <label>API 地址<input id="geminiBaseUrl"></label>
+          <button class="secondary test-provider" data-provider="gemini">测试 Gemini 连接</button><small id="geminiTestResult"></small>
+        </article>
+        <article class="card provider">
+          <div class="row"><h3>DeepSeek</h3><span id="deepSeekConfigured" class="badge">未配置</span></div>
+          <label>API Key<div class="secret"><input id="deepSeekApiKey" type="password" autocomplete="off" placeholder="粘贴新 Key；留空保留旧 Key"><button class="toggle-secret" data-target="deepSeekApiKey" type="button">显示</button></div></label>
+          <label class="check"><input id="clearDeepSeekApiKey" type="checkbox">清除已保存 Key</label>
+          <label>模型<input id="deepSeekModel"></label>
+          <label>API 地址<input id="deepSeekBaseUrl"></label>
+          <button class="secondary test-provider" data-provider="deepseek">测试 DeepSeek 连接</button><small id="deepSeekTestResult"></small>
+        </article>
+      </div>
+      <article class="card advanced">
+        <h3>会议成本与稳定性</h3>
+        <div class="fields">
+          <label>整场 Token 预算<input id="budgetTokens" type="number"></label>
+          <label>单次输出上限<input id="maxOutputTokens" type="number"></label>
+          <label>超时（毫秒）<input id="timeoutMs" type="number"></label>
+          <label>重试次数<input id="maxRetries" type="number"></label>
+          <label>重试延迟<input id="retryBaseDelayMs" type="number"></label>
+          <label>会议记录目录<div class="secret"><input id="meetingOutputDir" readonly><button id="chooseMeetingDirectory" type="button">选择</button></div></label>
+        </div>
+      </article>
+    </section>
+    <section id="page-history" class="page">
+      <div class="row"><div><h2>会议历史</h2><p>每场会议自动保存为 JSON 和 Markdown。</p></div><button id="refreshHistoryButton" class="secondary">刷新</button></div>
+      <div id="historyList" class="history"></div>
+    </section>
+  </main>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -130,6 +130,7 @@ export async function runCouncilMeeting(
     callOptions(moderator, `最终仲裁 · ${moderator.name}`, finalDecisionSchema, config.maxOutputTokensPerTurn)
   );
   estimatedUsageTokens += usageTotal(finalResult.usage);
+  enforceBudget(config.totalBudgetTokens, estimatedUsageTokens, "final arbitration");
 
   const result: CouncilMeetingResult = {
     meetingId,
