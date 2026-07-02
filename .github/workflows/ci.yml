@@ -13,5 +13,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npm run check
+      - name: Install dependencies
+        run: npm install
+      - name: Compile TypeScript
+        run: npm run build:ts
+      - name: Copy UI assets
+        run: npm run copy:ui
+      - name: Run council tests
+        run: node --test tests/council.test.mjs tests/final-budget.test.mjs
+      - name: Run provider tests
+        run: node --test tests/providers.test.mjs
+      - name: Run desktop tests
+        run: node --test tests/settings.test.mjs tests/ui-smoke.test.mjs tests/demo-cli.test.mjs
