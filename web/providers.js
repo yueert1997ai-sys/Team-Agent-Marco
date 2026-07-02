@@ -121,11 +121,17 @@ async function verifyProvider(provider, apiKey, timeoutMs, quiet = false) {
       return provider;
     }
 
-    const modelsResponse = await fetchWithTimeout(`${provider.baseUrl}/models`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${apiKey}` }
-    }, timeoutMs);
-    if (modelsResponse.ok) return provider;
+    let modelsError = null;
+    try {
+      const modelsResponse = await fetchWithTimeout(`${provider.baseUrl}/models`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${apiKey}` }
+      }, timeoutMs);
+      if (modelsResponse.ok) return provider;
+      modelsError = await responseError(modelsResponse, provider.label);
+    } catch (error) {
+      modelsError = error;
+    }
 
     if (provider.id === "zhipu" || provider.id.startsWith("custom-")) {
       const response = await fetchWithTimeout(`${provider.baseUrl}/chat/completions`, {
@@ -145,7 +151,7 @@ async function verifyProvider(provider, apiKey, timeoutMs, quiet = false) {
       throw await responseError(response, provider.label);
     }
 
-    throw await responseError(modelsResponse, provider.label);
+    throw modelsError || new Error(`${provider.label} 连接失败。`);
   } catch (error) {
     if (quiet) throw error;
     throw new Error(`${provider.label} 连接失败：${shortError(error)}`);
