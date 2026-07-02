@@ -16,7 +16,18 @@ jobs:
       - name: Install dependencies
         run: npm install
       - name: Compile TypeScript
-        run: npm run build:ts
+        id: compile
+        continue-on-error: true
+        run: npm run build:ts 2>&1 | tee compile.log
+      - name: Upload compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: typescript-diagnostics
+          path: compile.log
+      - name: Stop after compiler failure
+        if: steps.compile.outcome == 'failure'
+        run: exit 1
       - name: Copy UI assets
         run: npm run copy:ui
       - name: Run council tests
