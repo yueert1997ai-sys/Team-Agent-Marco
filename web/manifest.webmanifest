@@ -1,0 +1,9 @@
+{
+  "name": "Team Agent Marco Web",
+  "short_name": "Team Agent",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b0e14",
+  "theme_color": "#0b0e14",
+  "description": "GPT-5.5-led browser assistant with optional Gemini and DeepSeek consultation."
+}
