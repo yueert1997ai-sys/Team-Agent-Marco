@@ -1,0 +1,156 @@
+#!/usr/bin/env node
+import { createInterface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+import { readRuntimeConfig } from "../config/runtime.js";
+import { runCouncilMeeting } from "../runner.js";
+import { createConfiguredProviders } from "../providers/factory.js";
+import { MultiProviderExecutor } from "../providers/multi-provider-executor.js";
+import { saveMeetingResult } from "../storage/meeting-store.js";
+import type { CouncilEvent } from "../types.js";
+import { buildDemoTeam, type DemoMode } from "./team.js";
+
+interface CliArgs {
+  mode: "auto" | DemoMode;
+  topic?: string;
+  context?: string;
+  title?: string;
+  save: boolean;
+  help: boolean;
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    printHelp();
+    return;
+  }
+
+  const runtime = readRuntimeConfig();
+  const hasLiveProvider = Boolean(runtime.geminiApiKey || runtime.deepSeekApiKey);
+  const mode: DemoMode = args.mode === "auto" ? (hasLiveProvider ? "live" : "mock") : args.mode;
+  const topic = args.topic?.trim() || await askRequired("请输入本次会议议题：");
+  const context = args.context?.trim() ?? "";
+  const title = args.title?.trim() || makeTitle(topic);
+  const team = buildDemoTeam(title, topic, context, mode, runtime);
+  const providers = createConfiguredProviders(runtime);
+  const executor = new MultiProviderExecutor({
+    providers,
+    defaultProviderId: mode === "mock" ? "mock" : team.providerIds[0] ?? "mock"
+  });
+
+  printHeader(mode, team.providerIds, runtime);
+  const startedAt = new Date();
+  const result = await runCouncilMeeting(team.config, executor, { onEvent: printEvent });
+  printDecision(result.finalDecision, result.estimatedUsageTokens, result.failedMembers.length);
+
+  if (args.save) {
+    const saved = await saveMeetingResult(result, runtime.meetingOutputDir, {
+      mode,
+      providers: team.providerIds,
+      startedAt: startedAt.toISOString()
+    });
+    console.log(`\n会议记录已保存：\n- ${saved.markdownPath}\n- ${saved.jsonPath}`);
+  }
+}
+
+function parseArgs(argv: string[]): CliArgs {
+  const result: CliArgs = { mode: "auto", save: true, help: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--help" || arg === "-h") result.help = true;
+    else if (arg === "--no-save") result.save = false;
+    else if (arg === "--mode") result.mode = readMode(argv[++index]);
+    else if (arg === "--topic" || arg === "-t") result.topic = requireValue(arg, argv[++index]);
+    else if (arg === "--context" || arg === "-c") result.context = requireValue(arg, argv[++index]);
+    else if (arg === "--title") result.title = requireValue(arg, argv[++index]);
+    else if (arg?.startsWith("--mode=")) result.mode = readMode(arg.slice(7));
+    else if (arg?.startsWith("--topic=")) result.topic = arg.slice(8);
+    else if (arg?.startsWith("--context=")) result.context = arg.slice(10);
+    else if (arg?.startsWith("--title=")) result.title = arg.slice(8);
+    else if (arg) throw new Error(`Unknown argument: ${arg}`);
+  }
+  return result;
+}
+
+function readMode(value: string | undefined): CliArgs["mode"] {
+  if (value === "auto" || value === "mock" || value === "live") return value;
+  throw new Error("--mode must be auto, mock, or live.");
+}
+
+function requireValue(flag: string, value: string | undefined): string {
+  if (!value) throw new Error(`${flag} requires a value.`);
+  return value;
+}
+
+async function askRequired(question: string): Promise<string> {
+  const readline = createInterface({ input, output });
+  try {
+    while (true) {
+      const value = (await readline.question(question)).trim();
+      if (value) return value;
+      console.log("议题不能为空。");
+    }
+  } finally {
+    readline.close();
+  }
+}
+
+function printHeader(mode: DemoMode, providers: string[], runtime: ReturnType<typeof readRuntimeConfig>): void {
+  console.log("\n=== Team Agent Marco · Council Demo ===");
+  console.log(`模式：${mode === "mock" ? "模拟会议（不调用 API）" : "真实 API 会议"}`);
+  console.log(`Provider：${providers.join(", ")}`);
+  if (mode === "live") {
+    if (providers.includes("gemini")) console.log(`Gemini：${runtime.geminiModel}`);
+    if (providers.includes("deepseek")) console.log(`DeepSeek：${runtime.deepSeekModel}`);
+  }
+  console.log(`会议预算：${runtime.budgetTokens} tokens；单次输出上限：${runtime.maxOutputTokens}\n`);
+}
+
+function printEvent(event: CouncilEvent): void {
+  if (event.type === "stage_started") {
+    const labels = {
+      first: "第一轮独立发言",
+      digest: "主持人提炼分歧",
+      second: "第二轮定向商议",
+      final: "最终仲裁"
+    } as const;
+    console.log(`\n[${labels[event.stage]}]`);
+  } else if (event.type === "member_completed") {
+    console.log(`✓ ${event.memberId} 完成`);
+  } else if (event.type === "member_failed") {
+    console.log(`✗ ${event.memberId} 失败：${event.error}`);
+  }
+}
+
+function printDecision(
+  decision: Awaited<ReturnType<typeof runCouncilMeeting>>["finalDecision"],
+  tokens: number,
+  failedTurns: number
+): void {
+  console.log("\n=== 最终决定 ===");
+  console.log(decision.decision);
+  console.log(`\n${decision.summary}`);
+  if (decision.rationale.length > 0) {
+    console.log("\n依据：");
+    decision.rationale.forEach((item) => console.log(`- ${item}`));
+  }
+  if (decision.nextActions.length > 0) {
+    console.log("\n下一步：");
+    decision.nextActions.forEach((item) => console.log(`- [${item.priority}] ${item.owner}: ${item.action}`));
+  }
+  console.log(`\n估算 Token：${tokens}；失败轮次：${failedTurns}`);
+}
+
+function makeTitle(topic: string): string {
+  const compact = topic.replace(/\s+/g, " ").trim();
+  return compact.length <= 32 ? compact : `${compact.slice(0, 32)}…`;
+}
+
+function printHelp(): void {
+  console.log(`Team Agent Marco Council Demo\n\nUsage:\n  npm run demo\n  npm run demo -- --mode mock --topic "是否继续做这个项目？"\n\nOptions:\n  --mode auto|mock|live\n  --topic, -t\n  --context, -c\n  --title\n  --no-save\n  --help, -h\n`);
+}
+
+main().catch((error) => {
+  console.error(`\n运行失败：${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
+});

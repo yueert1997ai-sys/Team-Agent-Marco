@@ -1,0 +1,37 @@
+{
+  "name": "team-agent-marco",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/src/electron/main.js",
+  "description": "A GPT-5.5-led visual desktop assistant with optional expert models.",
+  "author": "Marco",
+  "scripts": {
+    "build:ts": "tsc -p tsconfig.json",
+    "copy:ui": "node scripts/copy-ui.mjs",
+    "build": "npm run build:ts && npm run copy:ui",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "check": "npm test",
+    "desktop": "npm run build && electron .",
+    "package:win": "npm run build && electron-builder --win portable --x64",
+    "demo": "npm run build:ts && node --env-file-if-exists=.env dist/src/demo/cli.js",
+    "demo:mock": "npm run build:ts && node dist/src/demo/cli.js --mode mock"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.marco.teamagent",
+    "productName": "Team Agent Marco",
+    "asar": true,
+    "files": ["dist/**/*", "package.json"],
+    "directories": {"output": "release"},
+    "win": {
+      "target": [{"target": "portable", "arch": ["x64"]}],
+      "artifactName": "Team-Agent-Marco-${version}-${arch}.${ext}"
+    }
+  }
+}

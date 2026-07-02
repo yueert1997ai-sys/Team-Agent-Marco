@@ -1,0 +1,19 @@
+Team Agent Marco v0.4.0
+
+Command: npm run check
+Result: PASS
+
+TypeScript strict build: PASS
+UI asset build: PASS
+Automated tests: 32 passed, 0 failed
+
+New coverage:
+- Universal API key auto-detection
+- OpenAI key detection
+- Gemini key detection
+- Invalid key rejection
+- GPT-5.5 forced final routing
+- Normal chat persistence
+- Optional internal Gemini/DeepSeek consultation
+- Single-field settings UI
+- Absence of meeting/roundtable UI

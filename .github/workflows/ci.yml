@@ -1,0 +1,29 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: npm install
+      - name: Compile
+        run: npm run build:ts
+      - name: Copy UI
+        run: npm run copy:ui
+      - name: Council tests
+        run: node --test tests/council.test.mjs tests/final-budget.test.mjs
+      - name: Provider tests
+        run: node --test tests/providers.test.mjs tests/provider-detection.test.mjs tests/openai-client.test.mjs
+      - name: Chat and settings tests
+        run: node --test tests/chat-service.test.mjs tests/settings.test.mjs
+      - name: Desktop UI tests
+        run: node --test tests/ui-smoke.test.mjs tests/demo-cli.test.mjs
+      - name: HTML web tests
+        run: node --test tests/web-html.test.mjs

@@ -1,0 +1,31 @@
+name: Build Windows app
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Compile TypeScript
+        run: npm run build:ts
+      - name: Copy UI assets
+        run: npm run copy:ui
+      - name: Run automated tests
+        run: node --test tests/*.test.mjs
+      - name: Package portable Windows app
+        run: npm run package:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Team-Agent-Marco-Windows
+          path: release/*.exe
+          if-no-files-found: error

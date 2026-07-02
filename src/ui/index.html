@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'none'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Team Agent Marco</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><b>M</b><span><strong>Team Agent</strong><small>GPT-5.5 总控</small></span></div>
+    <button id="newChatButton" class="new-chat">＋ 新对话</button>
+    <div class="sidebar-title">最近对话</div>
+    <div id="conversationList" class="conversation-list"></div>
+    <div class="sidebar-bottom">
+      <button id="openSettingsButton" class="settings-link">模型设置</button>
+      <small id="connectionSummary">正在检查模型连接</small>
+    </div>
+  </aside>
+
+  <main>
+    <section id="chatPage" class="page active">
+      <header class="topbar">
+        <div><h1 id="conversationTitle">新对话</h1><p id="chatStatus">GPT-5.5 将直接与你对话</p></div>
+        <span class="model-badge">GPT-5.5</span>
+      </header>
+      <div id="messages" class="messages">
+        <div id="welcome" class="welcome">
+          <div class="welcome-mark">M</div>
+          <h2>想聊什么，直接说</h2>
+          <p>GPT-5.5 固定负责最终回答。配置 Gemini 或 DeepSeek 后，它们只在后台提供辅助意见。</p>
+          <div class="suggestions">
+            <button>帮我判断这个项目下一步怎么做</button>
+            <button>把我的想法整理成可执行计划</button>
+            <button>帮我检查一个决策有没有漏洞</button>
+          </div>
+        </div>
+      </div>
+      <div class="composer-wrap">
+        <form id="chatForm" class="composer">
+          <textarea id="chatInput" rows="1" placeholder="给 Team Agent Marco 发消息…" autofocus></textarea>
+          <button id="sendButton" type="submit">发送</button>
+        </form>
+        <small id="composerHint">Enter 发送，Shift + Enter 换行</small>
+      </div>
+    </section>
+
+    <section id="settingsPage" class="page">
+      <header class="topbar">
+        <div><h1>模型设置</h1><p>只需要粘贴 Key，程序会自动识别平台并保存。</p></div>
+        <button id="backToChatButton" class="secondary">返回对话</button>
+      </header>
+
+      <div class="settings-shell">
+        <article class="card add-key-card">
+          <div class="section-label">添加模型</div>
+          <h2>粘贴一个 API Key</h2>
+          <p>支持 OpenAI、Google Gemini、DeepSeek。程序会测试连接并自动识别，不需要手动选择平台。</p>
+          <div class="key-row">
+            <input id="universalApiKey" type="password" autocomplete="off" placeholder="粘贴 API Key">
+            <button id="toggleUniversalKey" class="secondary" type="button">显示</button>
+            <button id="detectKeyButton" class="primary" type="button">识别并保存</button>
+          </div>
+          <div id="detectMessage" class="inline-message hidden"></div>
+        </article>
+
+        <article class="card">
+          <div class="row"><div><div class="section-label">已连接模型</div><h2>模型列表</h2></div><span id="secureStorageBadge" class="badge">检查中</span></div>
+          <div id="providerList" class="provider-list"></div>
+          <div class="openai-note">
+            <strong>GPT-5.5 是固定总控</strong>
+            <p>真实对话必须配置 OpenAI API Key。Gemini 和 DeepSeek 只负责后台辅助，可以不配置。</p>
+          </div>
+        </article>
+
+        <article class="card advanced-card">
+          <div class="section-label">运行偏好</div>
+          <div class="settings-grid">
+            <label class="switch-row"><span><strong>自动调用辅助模型</strong><small>有 Gemini / DeepSeek 时，让它们在后台补充观点</small></span><input id="consultExperts" type="checkbox"></label>
+            <label>GPT-5.5 单次输出上限<input id="maxOutputTokens" type="number" min="100" max="32000"></label>
+            <label>请求超时（毫秒）<input id="timeoutMs" type="number" min="5000" max="600000"></label>
+            <label>失败重试次数<input id="maxRetries" type="number" min="0" max="5"></label>
+            <label>重试延迟（毫秒）<input id="retryBaseDelayMs" type="number" min="100" max="10000"></label>
+            <label class="directory-field">对话记录目录<div class="directory-row"><input id="conversationDirectory" readonly><button id="chooseDirectoryButton" class="secondary" type="button">选择</button></div></label>
+          </div>
+          <button id="saveRuntimeButton" class="primary save-preferences" type="button">保存运行偏好</button>
+        </article>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>
