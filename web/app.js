@@ -11,10 +11,10 @@ import {
   saveProviders
 } from "./storage.js";
 import {
-  OPENAI_MODEL,
-  callOpenAI,
+  PROVIDER_DEFAULTS,
   consultProvider,
-  detectProvider
+  detectProvider,
+  generatePrimary
 } from "./providers.js";
 
 let preferences;
@@ -27,9 +27,14 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => 
 window.addEventListener("DOMContentLoaded", async () => {
   await initializeStorage();
   preferences = await loadPreferences();
-  providers = await loadProviders();
+  providers = normalizeProviders(await loadProviders());
+  if (providers.some((provider) => provider.id === "deepseek") && !providers.some((provider) => provider.id === preferences.primaryProviderId)) {
+    preferences.primaryProviderId = "deepseek";
+    await savePreferences(preferences);
+  }
   bindEvents();
   renderSettings();
+  renderPrimaryState();
   await loadConversationList();
   resizeInput();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => undefined);
@@ -48,11 +53,8 @@ function bindEvents() {
     }
   };
   document.querySelectorAll(".suggestions button").forEach((button) => button.onclick = () => fillSuggestion(button.textContent));
-  $("toggleKeyButton").onclick = () => {
-    const input = $("universalApiKey");
-    input.type = input.type === "password" ? "text" : "password";
-    $("toggleKeyButton").textContent = input.type === "password" ? "显示" : "隐藏";
-  };
+  $("toggleKeyButton").onclick = toggleKeyVisibility;
+  $("providerHint").onchange = toggleCustomFields;
   $("detectKeyButton").onclick = detectAndSaveKey;
   $("savePreferencesButton").onclick = persistPreferences;
 }
@@ -72,10 +74,10 @@ async function sendMessage(event) {
   event.preventDefault();
   const text = $("chatInput").value.trim();
   if (!text || sending) return;
-  const openAI = providers.find((provider) => provider.id === "openai");
-  if (!openAI) {
+  const primary = getPrimaryProvider();
+  if (!primary) {
     showPage("settings");
-    toast("请先添加 OpenAI API Key，GPT-5.5 才能回答。", true);
+    toast("请先连接一个模型。DeepSeek 会优先成为总控。", true);
     return;
   }
 
@@ -89,17 +91,19 @@ async function sendMessage(event) {
   appendMessage(userMessage);
   $("chatInput").value = "";
   resizeInput();
-  setStatus("GPT-5.5 正在理解你的问题");
-  const thinking = appendThinking();
+  setStatus(`${primary.label} 正在理解你的问题`);
+  const thinking = appendThinking(primary.label);
 
   try {
     const internalNotes = [];
     const consulted = [];
     if (preferences.consultExperts) {
-      const experts = providers.filter((provider) => provider.id !== "openai");
+      const experts = providers.filter((provider) => provider.id !== primary.id);
       if (experts.length) {
         setStatus("辅助模型正在后台补充意见");
-        const results = await Promise.all(experts.map((provider) => consultProvider(provider, conversation.messages, preferences.timeoutMs).catch(() => null)));
+        const results = await Promise.all(experts.map((provider) =>
+          consultProvider(provider, conversation.messages, preferences.timeoutMs).catch(() => null)
+        ));
         results.forEach((result, index) => {
           if (!result?.text) return;
           internalNotes.push(`${experts[index].label}：${result.text}`);
@@ -108,8 +112,8 @@ async function sendMessage(event) {
       }
     }
 
-    setStatus("GPT-5.5 正在组织最终回复");
-    const final = await callOpenAI({ provider: openAI, messages: conversation.messages, internalNotes, preferences });
+    setStatus(`${primary.label} 正在组织最终回复`);
+    const final = await generatePrimary({ provider: primary, messages: conversation.messages, internalNotes, preferences });
     const assistantMessage = createMessage("assistant", final.text);
     conversation.messages.push(assistantMessage);
     conversation.updatedAt = assistantMessage.createdAt;
@@ -117,7 +121,7 @@ async function sendMessage(event) {
     thinking.remove();
     appendMessage(assistantMessage, consulted, final.usage);
     $("conversationTitle").textContent = conversation.title;
-    setStatus(consulted.length ? `GPT-5.5 已参考 ${consulted.join("、")}` : "GPT-5.5 已回答");
+    setStatus(consulted.length ? `${primary.label} 已参考 ${consulted.join("、")}` : `${primary.label} 已回答`);
     await loadConversationList();
   } catch (error) {
     thinking.remove();
@@ -133,24 +137,34 @@ async function sendMessage(event) {
 async function detectAndSaveKey() {
   const key = $("universalApiKey").value.trim();
   if (!key) return showDetectMessage("请先粘贴 API Key。", true);
+  const hint = $("providerHint").value;
+  const custom = {
+    label: $("customLabel").value,
+    baseUrl: $("customBaseUrl").value,
+    model: $("customModel").value
+  };
   const button = $("detectKeyButton");
   button.disabled = true;
-  button.textContent = "正在识别…";
+  button.textContent = "连接中…";
   try {
-    const detected = await detectProvider(key, preferences.timeoutMs);
+    const detected = await detectProvider(key, preferences.timeoutMs, hint, custom);
     await saveProviderSecret(detected.id, key, $("rememberKey").checked);
     providers = [...providers.filter((provider) => provider.id !== detected.id), detected];
+    if (detected.id === "deepseek" || !getPrimaryProvider()) {
+      preferences.primaryProviderId = detected.id;
+      await savePreferences(preferences);
+    }
     await saveProviders(providers);
     $("universalApiKey").value = "";
-    showDetectMessage(`已识别为 ${detected.label}，并保存到当前浏览器。`);
+    showDetectMessage(`已连接 ${detected.label} · ${detected.model}`);
     renderProviders();
-    renderConnectionSummary();
+    renderPrimaryState();
     toast(`${detected.label} 已连接`);
   } catch (error) {
     showDetectMessage(readError(error), true);
   } finally {
     button.disabled = false;
-    button.textContent = "识别并保存";
+    button.textContent = "连接";
   }
 }
 
@@ -159,47 +173,103 @@ async function persistPreferences() {
     ...preferences,
     consultExperts: $("consultExperts").checked,
     maxOutputTokens: clampInteger($("maxOutputTokens").value, 100, 128000, 4000),
-    reasoningEffort: $("reasoningEffort").value,
     timeoutMs: clampInteger($("timeoutMs").value, 5000, 600000, 120000)
   };
   await savePreferences(preferences);
-  toast("聊天偏好已保存");
+  toast("已保存");
 }
 
 function renderSettings() {
   $("consultExperts").checked = preferences.consultExperts;
   $("maxOutputTokens").value = preferences.maxOutputTokens;
-  $("reasoningEffort").value = preferences.reasoningEffort;
   $("timeoutMs").value = preferences.timeoutMs;
+  toggleCustomFields();
   renderProviders();
-  renderConnectionSummary();
+  renderPrimaryState();
 }
 
 function renderProviders() {
   const box = $("providerList");
   if (!providers.length) {
-    box.innerHTML = `<div class="inline-message error">还没有连接模型。请先添加 OpenAI Key。</div>`;
+    box.innerHTML = `<div class="inline-message">还没有连接模型。你可以先添加 DeepSeek 或智谱 GLM。</div>`;
     return;
   }
-  box.innerHTML = providers.map((provider) => `<div class="provider-row"><div class="provider-title"><div class="provider-icon">${provider.id === "openai" ? "O" : provider.id === "gemini" ? "G" : "D"}</div><div><strong>${escapeHtml(provider.label)}${provider.id === "openai" ? " · 总控" : " · 辅助"}</strong><small>${provider.id === "openai" ? "固定使用 GPT-5.5 最终回答" : "后台提供内部参考"}</small></div></div>${provider.id === "openai" ? `<div class="fixed-model">${OPENAI_MODEL}</div>` : `<input class="provider-model" data-provider="${provider.id}" value="${escapeHtml(provider.model)}">`}<button class="danger remove-provider" data-provider="${provider.id}">移除</button></div>`).join("");
+  box.innerHTML = providers.map((provider) => {
+    const isPrimary = provider.id === preferences.primaryProviderId;
+    return `<div class="provider-row">
+      <div class="provider-title"><strong>${escapeHtml(provider.label)}${isPrimary ? '<span class="primary-tag">总控</span>' : ""}</strong><small>${escapeHtml(provider.baseUrl)}</small></div>
+      <input class="provider-model" data-provider="${escapeHtml(provider.id)}" value="${escapeHtml(provider.model)}" aria-label="模型名称">
+      ${isPrimary ? '<span></span>' : `<button class="set-primary" data-provider="${escapeHtml(provider.id)}">设为总控</button>`}
+      <button class="danger remove-provider" data-provider="${escapeHtml(provider.id)}">移除</button>
+    </div>`;
+  }).join("");
+
   box.querySelectorAll(".provider-model").forEach((input) => input.onchange = async () => {
-    providers = providers.map((provider) => provider.id === input.dataset.provider ? { ...provider, model: input.value.trim() || provider.model } : provider);
+    providers = providers.map((provider) => provider.id === input.dataset.provider
+      ? { ...provider, model: input.value.trim() || provider.model }
+      : provider
+    );
     await saveProviders(providers);
-    toast("模型名称已更新");
+    renderPrimaryState();
+    toast("模型名已更新");
+  });
+  box.querySelectorAll(".set-primary").forEach((button) => button.onclick = async () => {
+    preferences.primaryProviderId = button.dataset.provider;
+    await savePreferences(preferences);
+    renderProviders();
+    renderPrimaryState();
+    toast("总控已切换");
   });
   box.querySelectorAll(".remove-provider").forEach((button) => button.onclick = async () => {
-    await removeProviderSecret(button.dataset.provider);
-    providers = providers.filter((provider) => provider.id !== button.dataset.provider);
+    const removedId = button.dataset.provider;
+    await removeProviderSecret(removedId);
+    providers = providers.filter((provider) => provider.id !== removedId);
+    if (preferences.primaryProviderId === removedId) {
+      preferences.primaryProviderId = providers.find((provider) => provider.id === "deepseek")?.id || providers[0]?.id || "deepseek";
+      await savePreferences(preferences);
+    }
     await saveProviders(providers);
     renderProviders();
-    renderConnectionSummary();
-    toast("已移除模型连接");
+    renderPrimaryState();
+    toast("已移除模型");
   });
 }
 
-function renderConnectionSummary() {
-  const openAI = providers.some((provider) => provider.id === "openai");
-  $("connectionSummary").textContent = openAI ? `GPT-5.5 已连接${providers.length > 1 ? ` · ${providers.length - 1} 个辅助模型` : ""}` : "等待添加 OpenAI Key";
+function renderPrimaryState() {
+  const primary = getPrimaryProvider();
+  const label = primary ? `${primary.label} · ${primary.model}` : "未连接";
+  $("primaryModelBadge").textContent = primary?.label || "未连接";
+  $("connectionSummary").textContent = primary ? `总控：${label}` : "等待添加模型";
+  $("chatStatus").textContent = primary ? `${primary.label} 将作为当前总控` : "请先在设置中添加模型";
+  const subtitle = $("welcomeSubtitle");
+  if (subtitle) subtitle.textContent = primary
+    ? `${primary.label} 负责最终回答，其他模型可在后台提供参考。`
+    : "添加 DeepSeek、智谱 GLM 或其他模型后即可开始。";
+}
+
+function getPrimaryProvider() {
+  return providers.find((provider) => provider.id === preferences?.primaryProviderId)
+    || providers.find((provider) => provider.id === "deepseek")
+    || providers[0]
+    || null;
+}
+
+function normalizeProviders(items) {
+  return items.map((provider) => {
+    const defaults = PROVIDER_DEFAULTS[provider.id];
+    return defaults ? { ...defaults, ...provider } : { protocol: "openai-chat", ...provider };
+  });
+}
+
+function toggleCustomFields() {
+  const visible = $("providerHint").value === "custom";
+  document.querySelectorAll(".custom-field").forEach((field) => field.classList.toggle("hidden", !visible));
+}
+
+function toggleKeyVisibility() {
+  const input = $("universalApiKey");
+  input.type = input.type === "password" ? "text" : "password";
+  $("toggleKeyButton").textContent = input.type === "password" ? "显示 Key" : "隐藏 Key";
 }
 
 async function getOrCreateConversation(firstText) {
@@ -246,9 +316,10 @@ async function openConversation(id) {
 function newChat() {
   activeConversationId = null;
   $("conversationTitle").textContent = "新对话";
-  setStatus("GPT-5.5 将直接与你对话");
-  $("messages").innerHTML = `<div id="welcome" class="welcome"><div class="welcome-mark">M</div><h2>想聊什么，直接说</h2><p>GPT-5.5 固定负责最终回答；Gemini、DeepSeek 可在后台补充意见。</p><div class="suggestions"><button>帮我判断这个项目下一步怎么做</button><button>把我的想法整理成可执行计划</button><button>帮我检查一个决策有没有漏洞</button></div></div>`;
+  const primary = getPrimaryProvider();
+  $("messages").innerHTML = `<div id="welcome" class="welcome"><h2>有什么可以帮你？</h2><p id="welcomeSubtitle">${primary ? `${escapeHtml(primary.label)} 负责最终回答，其他模型可在后台提供参考。` : "添加模型后即可开始。"}</p><div class="suggestions"><button>帮我判断这个项目下一步怎么做</button><button>把我的想法整理成可执行计划</button><button>帮我检查一个决策有没有漏洞</button></div></div>`;
   document.querySelectorAll(".suggestions button").forEach((button) => button.onclick = () => fillSuggestion(button.textContent));
+  renderPrimaryState();
   showPage("chat");
   loadConversationList();
 }
@@ -257,15 +328,15 @@ function appendMessage(message, consulted = [], usage = 0) {
   const node = document.createElement("article");
   node.className = `message ${message.role}`;
   const meta = message.role === "assistant" && (consulted.length || usage)
-    ? `<div class="message-meta">${consulted.length ? `后台参考：${escapeHtml(consulted.join("、"))}` : ""}${consulted.length && usage ? " · " : ""}${usage ? `${usage} tokens` : ""}</div>`
+    ? `<div class="message-meta">${consulted.length ? `参考：${escapeHtml(consulted.join("、"))}` : ""}${consulted.length && usage ? " · " : ""}${usage ? `${usage} tokens` : ""}</div>`
     : "";
-  node.innerHTML = `<div class="avatar">${message.role === "user" ? "你" : "M"}</div><div><div class="bubble">${escapeHtml(message.content)}</div>${meta}</div>`;
+  node.innerHTML = `<div class="message-body"><div class="bubble">${escapeHtml(message.content)}</div>${meta}</div>`;
   $("messages").append(node);
   $("messages").scrollTop = $("messages").scrollHeight;
   return node;
 }
 
-function appendThinking() { return appendMessage(createMessage("assistant", "正在思考…")); }
+function appendThinking(label) { return appendMessage(createMessage("assistant", `${label} 正在思考…`)); }
 function setStatus(text) { $("chatStatus").textContent = text; }
 function showDetectMessage(text, error = false) { const box = $("detectMessage"); box.textContent = text; box.className = `inline-message${error ? " error" : ""}`; box.classList.remove("hidden"); }
 function resizeInput() { const input = $("chatInput"); input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight, 180)}px`; }

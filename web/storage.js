@@ -54,13 +54,14 @@ export function removeRecord(name, key) {
 }
 
 export async function loadPreferences() {
-  return (await getRecord("settings", "preferences")) || {
+  const defaults = {
     id: "preferences",
+    primaryProviderId: "deepseek",
     consultExperts: true,
     maxOutputTokens: 4000,
-    reasoningEffort: "medium",
     timeoutMs: 120000
   };
+  return { ...defaults, ...((await getRecord("settings", "preferences")) || {}) };
 }
 
 export async function savePreferences(preferences) {
@@ -106,13 +107,8 @@ export async function saveProviderSecret(providerId, secret, remember) {
   }
   const key = await getVaultKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = new TextEncoder().encode(secret);
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
-  await putRecord("vault", {
-    id: `secret:${providerId}`,
-    iv: bytesToBase64(iv),
-    ciphertext: bytesToBase64(new Uint8Array(ciphertext))
-  });
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(secret));
+  await putRecord("vault", { id: `secret:${providerId}`, iv: bytesToBase64(iv), ciphertext: bytesToBase64(new Uint8Array(ciphertext)) });
 }
 
 export async function readProviderSecret(providerId, providerLabel = providerId) {
@@ -121,11 +117,7 @@ export async function readProviderSecret(providerId, providerLabel = providerId)
   const record = await getRecord("vault", `secret:${providerId}`);
   if (!record) throw new Error(`${providerLabel} Key 不存在，请重新添加。`);
   const key = await getVaultKey();
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: base64ToBytes(record.iv) },
-    key,
-    base64ToBytes(record.ciphertext)
-  );
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64ToBytes(record.iv) }, key, base64ToBytes(record.ciphertext));
   return new TextDecoder().decode(plaintext);
 }
 
@@ -139,7 +131,6 @@ function bytesToBase64(bytes) {
   bytes.forEach((byte) => binary += String.fromCharCode(byte));
   return btoa(binary);
 }
-
 function base64ToBytes(value) {
   const binary = atob(value);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));

@@ -1,7 +1,7 @@
-const CACHE = "team-agent-marco-web-v1";
+const CACHE = "team-agent-marco-web-v2";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./storage.js", "./providers.js", "./manifest.webmanifest"];
-self.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS))));
-self.addEventListener("activate", (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))));
+self.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
+self.addEventListener("activate", (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim())));
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || !event.request.url.startsWith(self.location.origin)) return;
   event.respondWith(fetch(event.request).then((response) => {

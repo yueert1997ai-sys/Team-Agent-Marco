@@ -3,36 +3,35 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0b0e14">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://api.openai.com https://api.deepseek.com https://generativelanguage.googleapis.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'">
-  <title>Team Agent Marco Web</title>
+  <meta name="theme-color" content="#ffffff">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'">
+  <title>Team Agent Marco</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div class="app-shell">
   <aside class="sidebar">
-    <div class="brand"><span class="brand-mark">M</span><div><strong>Team Agent</strong><small>Marco Web</small></div></div>
+    <div class="brand"><strong>Team Agent</strong><small>Marco</small></div>
     <button id="newChatButton" class="new-chat">＋ 新对话</button>
     <div class="section-title">最近对话</div>
     <div id="conversationList" class="conversation-list"><small>还没有对话</small></div>
     <div class="sidebar-footer">
-      <button id="openSettingsButton" class="plain-button">模型设置</button>
-      <small id="connectionSummary">等待添加 OpenAI Key</small>
+      <button id="openSettingsButton" class="plain-button">设置</button>
+      <small id="connectionSummary">等待添加模型</small>
     </div>
   </aside>
 
   <main class="main-area">
     <section id="chatPage" class="page active">
       <header class="topbar">
-        <div><h1 id="conversationTitle">新对话</h1><p id="chatStatus">GPT-5.5 将直接与你对话</p></div>
-        <span class="model-badge">GPT-5.5</span>
+        <div><h1 id="conversationTitle">新对话</h1><p id="chatStatus">DeepSeek 将作为当前总控</p></div>
+        <span id="primaryModelBadge" class="model-badge">DeepSeek</span>
       </header>
       <div id="messages" class="messages">
         <div id="welcome" class="welcome">
-          <div class="welcome-mark">M</div>
-          <h2>想聊什么，直接说</h2>
-          <p>GPT-5.5 固定负责最终回答；Gemini、DeepSeek 可在后台补充意见。</p>
+          <h2>有什么可以帮你？</h2>
+          <p id="welcomeSubtitle">DeepSeek 负责最终回答，其他模型可在后台提供参考。</p>
           <div class="suggestions">
             <button>帮我判断这个项目下一步怎么做</button>
             <button>把我的想法整理成可执行计划</button>
@@ -42,8 +41,8 @@
       </div>
       <div class="composer-wrap">
         <form id="chatForm" class="composer">
-          <textarea id="chatInput" rows="1" placeholder="给 Team Agent Marco 发消息…" autofocus></textarea>
-          <button id="sendButton" type="submit">发送</button>
+          <textarea id="chatInput" rows="1" placeholder="输入消息…" autofocus></textarea>
+          <button id="sendButton" type="submit" aria-label="发送">↑</button>
         </form>
         <small>Enter 发送，Shift + Enter 换行</small>
       </div>
@@ -51,41 +50,52 @@
 
     <section id="settingsPage" class="page">
       <header class="topbar">
-        <div><h1>模型设置</h1><p>一个输入框，自动识别 OpenAI、Gemini 或 DeepSeek。</p></div>
-        <button id="backToChatButton" class="secondary-button">返回对话</button>
+        <div><h1>设置</h1><p>添加模型并选择总控。</p></div>
+        <button id="backToChatButton" class="text-button">返回</button>
       </header>
       <div class="settings-shell">
-        <article class="card">
-          <span class="eyebrow">ADD MODEL</span>
-          <h2>粘贴一个 API Key</h2>
-          <p>程序会联网检查平台并保存。Key 不会上传到 GitHub，也不会写入对话记录。</p>
-          <div class="key-row">
-            <input id="universalApiKey" type="password" autocomplete="off" placeholder="粘贴 API Key">
-            <button id="toggleKeyButton" class="secondary-button" type="button">显示</button>
-            <button id="detectKeyButton" class="primary-button" type="button">识别并保存</button>
+        <section class="settings-section">
+          <h2>添加 API</h2>
+          <p>默认自动识别。识别失败时，可手动指定平台；还支持任意 OpenAI 兼容接口。</p>
+          <div class="form-grid">
+            <label class="wide">API Key<input id="universalApiKey" type="password" autocomplete="off" placeholder="粘贴 API Key"></label>
+            <label>平台提示
+              <select id="providerHint">
+                <option value="auto">自动识别</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="zhipu">智谱 GLM</option>
+                <option value="openai">OpenAI</option>
+                <option value="gemini">Google Gemini</option>
+                <option value="custom">其他 OpenAI 兼容接口</option>
+              </select>
+            </label>
+            <label id="customLabelField" class="custom-field hidden">名称<input id="customLabel" placeholder="例如 Kimi"></label>
+            <label id="customBaseUrlField" class="custom-field hidden">Base URL<input id="customBaseUrl" placeholder="https://example.com/v1"></label>
+            <label id="customModelField" class="custom-field hidden">模型名<input id="customModel" placeholder="model-name"></label>
           </div>
-          <label class="remember-row"><input id="rememberKey" type="checkbox" checked> 在这台设备的当前浏览器中加密保存</label>
+          <div class="add-actions">
+            <label class="remember-row"><input id="rememberKey" type="checkbox" checked> 在当前浏览器加密保存</label>
+            <div><button id="toggleKeyButton" class="text-button" type="button">显示 Key</button><button id="detectKeyButton" class="primary-button" type="button">连接</button></div>
+          </div>
           <div id="detectMessage" class="inline-message hidden"></div>
-          <div class="security-note"><strong>网页模式边界</strong><p>Key 使用 Web Crypto 加密后保存在 IndexedDB。网页运行时仍可解密，因此只应在自己的设备、自己的浏览器中使用。</p></div>
-        </article>
+        </section>
 
-        <article class="card">
-          <div class="row"><div><span class="eyebrow">CONNECTED</span><h2>已连接模型</h2></div><span id="storageBadge" class="status-badge">浏览器本地存储</span></div>
+        <section class="settings-section">
+          <div class="section-head"><div><h2>已连接模型</h2><p>DeepSeek 添加后会自动成为总控，也可以手动切换。</p></div><span id="storageBadge">本地存储</span></div>
           <div id="providerList" class="provider-list"></div>
-          <div class="openai-note"><strong>GPT-5.5 固定总控</strong><p>真实聊天必须有 OpenAI Key。Gemini 和 DeepSeek 只提供后台内部参考，可以不配置。</p></div>
-        </article>
+        </section>
 
-        <article class="card">
-          <span class="eyebrow">PREFERENCES</span>
+        <section class="settings-section">
           <h2>聊天偏好</h2>
-          <div class="settings-grid">
-            <label class="switch-row"><span><strong>自动调用辅助模型</strong><small>有 Gemini / DeepSeek 时，在复杂问题中后台参考</small></span><input id="consultExperts" type="checkbox" checked></label>
-            <label>GPT-5.5 输出上限<input id="maxOutputTokens" type="number" min="100" max="128000" value="4000"></label>
-            <label>推理强度<select id="reasoningEffort"><option value="low">低</option><option value="medium" selected>中</option><option value="high">高</option><option value="xhigh">极高</option></select></label>
+          <div class="preference-list">
+            <label class="switch-row"><span><strong>调用辅助模型</strong><small>其他已连接模型在后台补充观点</small></span><input id="consultExperts" type="checkbox" checked></label>
+            <label>单次输出上限<input id="maxOutputTokens" type="number" min="100" max="128000" value="4000"></label>
             <label>请求超时（毫秒）<input id="timeoutMs" type="number" min="5000" max="600000" value="120000"></label>
           </div>
-          <button id="savePreferencesButton" class="primary-button" type="button">保存偏好</button>
-        </article>
+          <button id="savePreferencesButton" class="primary-button" type="button">保存</button>
+        </section>
+
+        <p class="security-footnote">Key 只保存在当前浏览器。网页运行时能够解密 Key，请仅在自己的设备上使用。</p>
       </div>
     </section>
   </main>
