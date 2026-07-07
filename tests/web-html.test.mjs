@@ -28,12 +28,31 @@ test("browser provider layer forwards custom agent prompts into model calls", as
   assert.match(source, /generatePrimary/);
 });
 
-test("browser storage has default profiles for 老D and 智谱参谋", async () => {
+test("browser storage has avatars and corrected default profiles for connected agents", async () => {
   const source = await read("web/storage.js");
   assert.match(source, /DEFAULT_AGENT_PROFILES/);
   assert.match(source, /老D/);
   assert.match(source, /智谱参谋/);
+  assert.match(source, /displayName:\s*"Gemini"/);
+  assert.doesNotMatch(source, /Gemi"/);
+  assert.match(source, /avatar/);
   assert.match(source, /AES-GCM/);
+});
+
+test("agent UI only renders connected providers and supports avatars", async () => {
+  const source = await read("web/app.js");
+  assert.match(source, /if \(!providers\.length\)/);
+  assert.match(source, /providers\.map\(\(provider\)/);
+  assert.match(source, /data-field=\"avatar\"/);
+  assert.match(source, /agentAvatar/);
+  assert.match(source, /Math\.min\(input\.scrollHeight, 360\)/);
+});
+
+test("composer is large enough for long prompts", async () => {
+  const css = await read("web/styles.css");
+  assert.match(css, /min-height:96px/);
+  assert.match(css, /max-height:360px/);
+  assert.match(css, /resize:vertical/);
 });
 
 test("all web JavaScript files pass syntax checks", async () => {
