@@ -5,100 +5,101 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#ffffff">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'">
-  <title>Team Agent Marco</title>
+  <title>Marco Lab</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div class="app-shell">
   <aside class="sidebar">
-    <div class="brand"><strong>Team Agent</strong><small>Marco</small></div>
-    <button id="newChatButton" class="new-chat">＋ 新对话</button>
+    <div class="brand"><strong>MARCO LAB</strong><small>私人 AI 工作台</small></div>
+    <button id="newChatButton" class="nav-primary">+ 新对话</button>
+    <button id="openSettingsButton" class="nav-link">模型接入</button>
+    <button id="openAgentsButton" class="nav-link">Agent 定制</button>
     <div class="section-title">最近对话</div>
     <div id="conversationList" class="conversation-list"><small>还没有对话</small></div>
-    <div class="sidebar-footer">
-      <button id="openSettingsButton" class="plain-button">设置</button>
-      <small id="connectionSummary">等待添加模型</small>
-    </div>
+    <div class="sidebar-footer"><small id="connectionSummary">等待添加模型</small></div>
   </aside>
 
   <main class="main-area">
     <section id="chatPage" class="page active">
       <header class="topbar">
-        <div><h1 id="conversationTitle">新对话</h1><p id="chatStatus">DeepSeek 将作为当前总控</p></div>
-        <span id="primaryModelBadge" class="model-badge">DeepSeek</span>
+        <div><h1 id="conversationTitle">新对话</h1><p id="chatStatus">老D 将作为当前总控</p></div>
+        <span id="primaryModelBadge" class="model-badge">老D</span>
       </header>
       <div id="messages" class="messages">
         <div id="welcome" class="welcome">
-          <h2>有什么可以帮你？</h2>
-          <p id="welcomeSubtitle">DeepSeek 负责最终回答，其他模型可在后台提供参考。</p>
+          <div class="lab-stamp">MARCO / AGENT DESK</div>
+          <h2>直接说事。</h2>
+          <p id="welcomeSubtitle">老D 负责最终回答，其他 Agent 可在后台补充意见。</p>
           <div class="suggestions">
-            <button>帮我判断这个项目下一步怎么做</button>
-            <button>把我的想法整理成可执行计划</button>
-            <button>帮我检查一个决策有没有漏洞</button>
+            <button>让老D和智谱参谋一起判断这个项目下一步</button>
+            <button>把我的想法拆成产品计划和风险清单</button>
+            <button>让所有 Agent 先吵一轮再给结论</button>
           </div>
         </div>
       </div>
       <div class="composer-wrap">
         <form id="chatForm" class="composer">
-          <textarea id="chatInput" rows="1" placeholder="输入消息…" autofocus></textarea>
-          <button id="sendButton" type="submit" aria-label="发送">↑</button>
+          <textarea id="chatInput" rows="1" placeholder="输入你要处理的事…" autofocus></textarea>
+          <button id="sendButton" type="submit" aria-label="发送">↵</button>
         </form>
         <small>Enter 发送，Shift + Enter 换行</small>
       </div>
     </section>
 
     <section id="settingsPage" class="page">
-      <header class="topbar">
-        <div><h1>设置</h1><p>添加模型并选择总控。</p></div>
-        <button id="backToChatButton" class="text-button">返回</button>
-      </header>
+      <header class="topbar"><div><h1>模型接入</h1><p>添加 API，选择总控。DeepSeek 默认叫老D。</p></div><button class="text-button backToChatButton">返回</button></header>
       <div class="settings-shell">
         <section class="settings-section">
           <h2>添加 API</h2>
-          <p>默认自动识别。识别失败时，可手动指定平台；还支持任意 OpenAI 兼容接口。</p>
+          <p>自动识别失败时，直接手动指定平台；智谱 GLM 和任意 OpenAI 兼容接口都能接。</p>
           <div class="form-grid">
             <label class="wide">API Key<input id="universalApiKey" type="password" autocomplete="off" placeholder="粘贴 API Key"></label>
-            <label>平台提示
-              <select id="providerHint">
-                <option value="auto">自动识别</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="zhipu">智谱 GLM</option>
-                <option value="openai">OpenAI</option>
-                <option value="gemini">Google Gemini</option>
-                <option value="custom">其他 OpenAI 兼容接口</option>
-              </select>
-            </label>
+            <label>平台提示<select id="providerHint"><option value="auto">自动识别</option><option value="deepseek">DeepSeek</option><option value="zhipu">智谱 GLM</option><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option><option value="custom">其他 OpenAI 兼容接口</option></select></label>
             <label id="customLabelField" class="custom-field hidden">名称<input id="customLabel" placeholder="例如 Kimi"></label>
             <label id="customBaseUrlField" class="custom-field hidden">Base URL<input id="customBaseUrl" placeholder="https://example.com/v1"></label>
             <label id="customModelField" class="custom-field hidden">模型名<input id="customModel" placeholder="model-name"></label>
           </div>
-          <div class="add-actions">
-            <label class="remember-row"><input id="rememberKey" type="checkbox" checked> 在当前浏览器加密保存</label>
-            <div><button id="toggleKeyButton" class="text-button" type="button">显示 Key</button><button id="detectKeyButton" class="primary-button" type="button">连接</button></div>
-          </div>
+          <div class="add-actions"><label class="remember-row"><input id="rememberKey" type="checkbox" checked> 在当前浏览器加密保存</label><div><button id="toggleKeyButton" class="text-button" type="button">显示 Key</button><button id="detectKeyButton" class="primary-button" type="button">连接</button></div></div>
           <div id="detectMessage" class="inline-message hidden"></div>
         </section>
 
         <section class="settings-section">
-          <div class="section-head"><div><h2>已连接模型</h2><p>DeepSeek 添加后会自动成为总控，也可以手动切换。</p></div><span id="storageBadge">本地存储</span></div>
+          <div class="section-head"><div><h2>已连接模型</h2><p>可以把任意模型设为总控。默认优先老D。</p></div><span id="storageBadge">本地存储</span></div>
           <div id="providerList" class="provider-list"></div>
         </section>
 
         <section class="settings-section">
           <h2>聊天偏好</h2>
           <div class="preference-list">
-            <label class="switch-row"><span><strong>调用辅助模型</strong><small>其他已连接模型在后台补充观点</small></span><input id="consultExperts" type="checkbox" checked></label>
+            <label class="switch-row"><span><strong>调用辅助 Agent</strong><small>其他已连接模型会先给意见，右侧显示全过程</small></span><input id="consultExperts" type="checkbox" checked></label>
+            <label class="switch-row"><span><strong>显示过程面板</strong><small>展示 Agent 思考、发言和整合步骤</small></span><input id="showProcess" type="checkbox" checked></label>
             <label>单次输出上限<input id="maxOutputTokens" type="number" min="100" max="128000" value="4000"></label>
             <label>请求超时（毫秒）<input id="timeoutMs" type="number" min="5000" max="600000" value="120000"></label>
           </div>
           <button id="savePreferencesButton" class="primary-button" type="button">保存</button>
         </section>
+      </div>
+    </section>
 
-        <p class="security-footnote">Key 只保存在当前浏览器。网页运行时能够解密 Key，请仅在自己的设备上使用。</p>
+    <section id="agentsPage" class="page">
+      <header class="topbar"><div><h1>Agent 定制</h1><p>给模型起名字、定性格、写系统提示词。</p></div><button class="text-button backToChatButton">返回</button></header>
+      <div class="settings-shell">
+        <section class="settings-section">
+          <h2>你的 Agent 团队</h2>
+          <p>这里的内容会进入每个 Agent 的系统提示词。比如 DeepSeek 可以叫老D，智谱可以叫智谱参谋。</p>
+          <div id="agentProfileList" class="agent-profile-list"></div>
+          <button id="saveAgentsButton" class="primary-button" type="button">保存 Agent 配置</button>
+        </section>
       </div>
     </section>
   </main>
+
+  <aside id="processPanel" class="process-panel">
+    <div class="process-head"><strong>WORKLOG</strong><small id="processHint">Agent 发言过程会显示在这里</small></div>
+    <div id="processList" class="process-list"><div class="process-empty">等待任务。</div></div>
+  </aside>
 </div>
 <div id="toast" class="toast hidden"></div>
 <script src="app.js" type="module"></script>

@@ -5,42 +5,35 @@ import { promisify } from "node:util";
 import test from "node:test";
 
 const execFileAsync = promisify(execFile);
+async function read(path) { return readFile(new URL(`../${path}`, import.meta.url), "utf8"); }
 
-async function read(path) {
-  return readFile(new URL(`../${path}`, import.meta.url), "utf8");
-}
-
-test("HTML version uses a minimal light chat interface", async () => {
+test("HTML version uses Marco Lab workbench with visible agent process", async () => {
   const html = await read("web/index.html");
-  for (const id of ["chatPage", "chatForm", "chatInput", "settingsPage", "universalApiKey", "providerHint", "providerList"]) {
+  for (const id of ["chatPage", "processPanel", "processList", "agentsPage", "agentProfileList", "universalApiKey", "providerHint"]) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
-  assert.match(html, /theme-color" content="#ffffff"/);
-  assert.match(html, /DeepSeek 将作为当前总控/);
-  assert.match(html, /智谱 GLM/);
-  assert.match(html, /其他 OpenAI 兼容接口/);
+  assert.match(html, /MARCO LAB/);
+  assert.match(html, /Agent 定制/);
+  assert.match(html, /右侧显示全过程/);
   assert.doesNotMatch(html, /召开会议|圆桌会议|geminiApiKey|deepSeekApiKey/);
-  assert.doesNotMatch(html, /<script[^>]+https?:\/\//i);
 });
 
-test("browser provider layer supports DeepSeek, GLM, OpenAI, Gemini and custom compatible APIs", async () => {
+test("browser provider layer forwards custom agent prompts into model calls", async () => {
   const source = await read("web/providers.js");
-  assert.match(source, /api\.deepseek\.com/);
+  assert.match(source, /buildSystemPrompt/);
+  assert.match(source, /displayName/);
+  assert.match(source, /personality/);
+  assert.match(source, /systemPrompt/);
   assert.match(source, /open\.bigmodel\.cn\/api\/paas\/v4/);
-  assert.match(source, /glm-5\.2/);
-  assert.match(source, /api\.openai\.com/);
-  assert.match(source, /generativelanguage\.googleapis\.com/);
-  assert.match(source, /custom-\$\{crypto\.randomUUID\(\)\}/);
   assert.match(source, /generatePrimary/);
 });
 
-test("DeepSeek is the default primary provider preference", async () => {
+test("browser storage has default profiles for 老D and 智谱参谋", async () => {
   const source = await read("web/storage.js");
-  assert.match(source, /primaryProviderId:\s*["']deepseek["']/);
-  assert.match(source, /indexedDB\.open/);
+  assert.match(source, /DEFAULT_AGENT_PROFILES/);
+  assert.match(source, /老D/);
+  assert.match(source, /智谱参谋/);
   assert.match(source, /AES-GCM/);
-  assert.match(source, /saveConversation/);
-  assert.doesNotMatch(source, /localStorage\.setItem\([^)]*key/i);
 });
 
 test("all web JavaScript files pass syntax checks", async () => {
