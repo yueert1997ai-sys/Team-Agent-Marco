@@ -25,7 +25,10 @@
     <section id="chatPage" class="page active">
       <header class="topbar">
         <div><h1 id="conversationTitle">新对话</h1><p id="chatStatus">老D 将作为当前总控</p></div>
-        <span id="primaryModelBadge" class="model-badge">老D</span>
+        <div class="top-actions">
+          <button id="exportMarkdownButton" class="text-button" type="button">导出 Markdown</button>
+          <span id="primaryModelBadge" class="model-badge">老D</span>
+        </div>
       </header>
       <div id="messages" class="messages">
         <div id="welcome" class="welcome">
@@ -41,10 +44,10 @@
       </div>
       <div class="composer-wrap">
         <form id="chatForm" class="composer">
-          <textarea id="chatInput" rows="1" placeholder="输入你要处理的事…" autofocus></textarea>
+          <textarea id="chatInput" rows="4" placeholder="输入你要处理的事…" autofocus></textarea>
           <button id="sendButton" type="submit" aria-label="发送">↵</button>
         </form>
-        <small>Enter 发送，Shift + Enter 换行</small>
+        <small>Enter 发送，Shift + Enter 换行；输入框可从右下角手动拖高</small>
       </div>
     </section>
 
@@ -84,7 +87,7 @@
     </section>
 
     <section id="agentsPage" class="page">
-      <header class="topbar"><div><h1>Agent 定制</h1><p>给模型起名字、定性格、写系统提示词。</p></div><button class="text-button backToChatButton">返回</button></header>
+      <header class="topbar"><div><h1>Agent 定制</h1><p>只显示已接入 API 的模型；没有接入的不会出现在这里。</p></div><button class="text-button backToChatButton">返回</button></header>
       <div class="settings-shell">
         <section class="settings-section">
           <h2>你的 Agent 团队</h2>
