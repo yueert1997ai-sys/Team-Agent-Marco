@@ -9,12 +9,13 @@ async function read(path) { return readFile(new URL(`../${path}`, import.meta.ur
 
 test("HTML version uses Marco Lab workbench with visible agent process", async () => {
   const html = await read("web/index.html");
-  for (const id of ["chatPage", "processPanel", "processList", "agentsPage", "agentProfileList", "universalApiKey", "providerHint"]) {
+  for (const id of ["chatPage", "processPanel", "processList", "agentsPage", "agentProfileList", "universalApiKey", "providerHint", "exportMarkdownButton"]) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
   assert.match(html, /MARCO LAB/);
   assert.match(html, /Agent 定制/);
   assert.match(html, /右侧显示全过程/);
+  assert.match(html, /导出 Markdown/);
   assert.doesNotMatch(html, /召开会议|圆桌会议|geminiApiKey|deepSeekApiKey/);
 });
 
@@ -45,14 +46,17 @@ test("agent UI only renders connected providers and supports avatars", async () 
   assert.match(source, /providers\.map\(\(provider\)/);
   assert.match(source, /data-field=\"avatar\"/);
   assert.match(source, /agentAvatar/);
-  assert.match(source, /Math\.min\(input\.scrollHeight, 360\)/);
+  assert.match(source, /Math\.min\(input\.scrollHeight, maxHeight\)/);
+  assert.match(source, /exportCurrentMarkdown/);
 });
 
-test("composer is large enough for long prompts", async () => {
+test("composer is large enough for long prompts and keeps manual resize usable", async () => {
   const css = await read("web/styles.css");
+  const app = await read("web/app.js");
   assert.match(css, /min-height:96px/);
   assert.match(css, /max-height:360px/);
   assert.match(css, /resize:vertical/);
+  assert.match(app, /currentHeight > targetHeight/);
 });
 
 test("all web JavaScript files pass syntax checks", async () => {
