@@ -25,20 +25,17 @@
     <section id="chatPage" class="page active">
       <header class="topbar">
         <div><h1 id="conversationTitle">新对话</h1><p id="chatStatus">老D 将作为当前总控</p></div>
-        <div class="top-actions">
-          <button id="exportMarkdownButton" class="text-button" type="button">导出 Markdown</button>
-          <span id="primaryModelBadge" class="model-badge">老D</span>
-        </div>
+        <div class="top-actions"><button id="exportMarkdownButton" class="text-button" type="button">导出 Markdown</button><span id="primaryModelBadge" class="model-badge">老D</span></div>
       </header>
       <div id="messages" class="messages">
         <div id="welcome" class="welcome">
           <div class="lab-stamp">MARCO / AGENT DESK</div>
           <h2>直接说事。</h2>
-          <p id="welcomeSubtitle">老D 负责最终回答，其他 Agent 可在后台补充意见。</p>
+          <p id="welcomeSubtitle">老D 负责最终回答，碰撞模式会在右侧显示每轮发言。</p>
           <div class="suggestions">
-            <button>让老D和智谱参谋一起判断这个项目下一步</button>
+            <button>让老D和智谱参谋进行两轮碰撞后给结论</button>
             <button>把我的想法拆成产品计划和风险清单</button>
-            <button>让所有 Agent 先吵一轮再给结论</button>
+            <button>让所有 Agent 先互相反驳再给我结果</button>
           </div>
         </div>
       </div>
@@ -47,7 +44,7 @@
           <textarea id="chatInput" rows="4" placeholder="输入你要处理的事…" autofocus></textarea>
           <button id="sendButton" type="submit" aria-label="发送">↵</button>
         </form>
-        <small>Enter 发送，Shift + Enter 换行；输入框可从右下角手动拖高</small>
+        <small>Enter 发送，Shift + Enter 换行</small>
       </div>
     </section>
 
@@ -76,8 +73,10 @@
         <section class="settings-section">
           <h2>聊天偏好</h2>
           <div class="preference-list">
-            <label class="switch-row"><span><strong>调用辅助 Agent</strong><small>其他已连接模型会先给意见，右侧显示全过程</small></span><input id="consultExperts" type="checkbox" checked></label>
-            <label class="switch-row"><span><strong>显示过程面板</strong><small>展示 Agent 思考、发言和整合步骤</small></span><input id="showProcess" type="checkbox" checked></label>
+            <label class="switch-row"><span><strong>调用辅助 Agent</strong><small>其他已连接模型参与分析</small></span><input id="consultExperts" type="checkbox" checked></label>
+            <label class="switch-row"><span><strong>Agent 碰撞模式</strong><small>老D和智谱先初判，再互相反驳修正，最后总控整合</small></span><input id="debateMode" type="checkbox" checked></label>
+            <label>碰撞轮数<select id="debateRounds"><option value="1">1 轮：独立初判</option><option value="2">2 轮：初判 + 反驳修正</option></select></label>
+            <label class="switch-row"><span><strong>显示过程面板</strong><small>展示 Agent 工作发言和整合步骤</small></span><input id="showProcess" type="checkbox" checked></label>
             <label>单次输出上限<input id="maxOutputTokens" type="number" min="100" max="128000" value="4000"></label>
             <label>请求超时（毫秒）<input id="timeoutMs" type="number" min="5000" max="600000" value="120000"></label>
           </div>
@@ -87,11 +86,11 @@
     </section>
 
     <section id="agentsPage" class="page">
-      <header class="topbar"><div><h1>Agent 定制</h1><p>只显示已接入 API 的模型；没有接入的不会出现在这里。</p></div><button class="text-button backToChatButton">返回</button></header>
+      <header class="topbar"><div><h1>Agent 定制</h1><p>给已接入模型起名字、定性格、写系统提示词。</p></div><button class="text-button backToChatButton">返回</button></header>
       <div class="settings-shell">
         <section class="settings-section">
           <h2>你的 Agent 团队</h2>
-          <p>这里的内容会进入每个 Agent 的系统提示词。比如 DeepSeek 可以叫老D，智谱可以叫智谱参谋。</p>
+          <p>这里只显示已接入 API 的模型。这里写的名字、头像、性格和提示词会进入真实请求。</p>
           <div id="agentProfileList" class="agent-profile-list"></div>
           <button id="saveAgentsButton" class="primary-button" type="button">保存 Agent 配置</button>
         </section>
@@ -100,7 +99,7 @@
   </main>
 
   <aside id="processPanel" class="process-panel">
-    <div class="process-head"><strong>WORKLOG</strong><small id="processHint">Agent 发言过程会显示在这里</small></div>
+    <div class="process-head"><strong>WORKLOG</strong><small id="processHint">Agent 碰撞过程会显示在这里</small></div>
     <div id="processList" class="process-list"><div class="process-empty">等待任务。</div></div>
   </aside>
 </div>

@@ -35,7 +35,7 @@ export async function detectProvider(key, timeoutMs, hint = "auto", custom = {})
 
 export async function generatePrimary({ provider, messages, internalNotes, preferences, agent }) {
   const apiKey = await readProviderSecret(provider.id, provider.label);
-  const systemPrompt = buildSystemPrompt(provider, agent, true, internalNotes);
+  const systemPrompt = buildSystemPrompt(provider, agent, "final", { internalNotes });
   if (provider.protocol === "gemini") return callGemini(provider, apiKey, systemPrompt, messages, preferences.timeoutMs, preferences.maxOutputTokens);
   if (provider.protocol === "openai-responses") return callOpenAIResponses(provider, apiKey, systemPrompt, messages, preferences);
   return callOpenAICompatible(provider, apiKey, systemPrompt, messages, preferences.timeoutMs, preferences.maxOutputTokens);
@@ -43,7 +43,7 @@ export async function generatePrimary({ provider, messages, internalNotes, prefe
 
 export async function consultProvider(provider, messages, timeoutMs, agent) {
   const apiKey = await readProviderSecret(provider.id, provider.label);
-  const systemPrompt = buildSystemPrompt(provider, agent, false, []);
+  const systemPrompt = buildSystemPrompt(provider, agent, "consult", {});
   const recent = messages.slice(-10).map((message) => `${message.role === "user" ? "用户" : "助手"}：${message.content}`).join("\n\n");
   const consultantMessages = [{ role: "user", content: `最近对话：\n\n${recent}\n\n请输出你的独立判断，包含：1. 核心看法 2. 风险 3. 你建议总控怎么回。` }];
   if (provider.protocol === "gemini") return callGemini(provider, apiKey, systemPrompt, consultantMessages, timeoutMs, 1600);
@@ -51,21 +51,32 @@ export async function consultProvider(provider, messages, timeoutMs, agent) {
   return callOpenAICompatible(provider, apiKey, systemPrompt, consultantMessages, timeoutMs, 1600);
 }
 
-function buildSystemPrompt(provider, agent = {}, primary, internalNotes) {
+export async function debateProvider({ provider, messages, timeoutMs, agent, round, peerNotes }) {
+  const apiKey = await readProviderSecret(provider.id, provider.label);
+  const systemPrompt = buildSystemPrompt(provider, agent, round === 1 ? "debate-round1" : "debate-round2", { peerNotes });
+  const recent = messages.slice(-10).map((message) => `${message.role === "user" ? "用户" : "助手"}：${message.content}`).join("\n\n");
+  const prompt = round === 1
+    ? `最近对话：\n\n${recent}\n\n请先独立判断用户问题。输出格式：\n1. 核心判断\n2. 关键问题\n3. 下一步建议\n4. 最大风险`
+    : `最近对话：\n\n${recent}\n\n其他 Agent 的初判：\n\n${peerNotes.join("\n\n")}\n\n请进行碰撞式回应。输出格式：\n1. 你同意哪一点\n2. 你反对哪一点\n3. 对方遗漏了什么\n4. 你修正后的建议`;
+  const debateMessages = [{ role: "user", content: prompt }];
+  if (provider.protocol === "gemini") return callGemini(provider, apiKey, systemPrompt, debateMessages, timeoutMs, 1200);
+  if (provider.protocol === "openai-responses") return callOpenAIResponses(provider, apiKey, systemPrompt, debateMessages, { timeoutMs, maxOutputTokens: 1200, reasoningEffort: "low" });
+  return callOpenAICompatible(provider, apiKey, systemPrompt, debateMessages, timeoutMs, 1200);
+}
+
+function buildSystemPrompt(provider, agent = {}, mode, context = {}) {
   const name = agent.displayName || provider.label;
-  const role = agent.role || (primary ? "总控" : "后台顾问");
+  const role = agent.role || (mode === "final" ? "总控" : "后台顾问");
   const personality = agent.personality || "直接、清晰、可执行。";
   const custom = agent.systemPrompt || "";
-  return [
-    `你是 ${name}。底层模型是 ${provider.label} / ${provider.model}。`,
-    `你的角色：${role}。`,
-    `你的表达性格：${personality}。`,
-    custom,
-    primary
-      ? "你是当前总控，负责给用户最终回答。可以参考其他 Agent 的意见，但要自己判断，不要机械汇总。"
-      : "你是后台 Agent，只输出给总控看的独立意见。可以尖锐、可以反对，但要具体。",
-    primary && internalNotes.length ? `其他 Agent 的可见发言：\n\n${internalNotes.join("\n\n")}` : ""
-  ].filter(Boolean).join("\n\n");
+  const modePrompt = {
+    consult: "你是后台 Agent，只输出给总控看的独立意见。可以尖锐、可以反对，但要具体。",
+    "debate-round1": "你正在参加 Agent 碰撞。第一轮只做独立初判，不要迎合其他人。输出的是可展示的工作发言，不要输出隐藏思维链。",
+    "debate-round2": "你正在参加 Agent 碰撞。第二轮需要阅读其他 Agent 的观点，做反驳、补充、修正。输出的是可展示的工作发言，不要输出隐藏思维链。",
+    final: "你是当前总控，负责给用户最终回答。阅读所有 Agent 的发言后，给明确结论、关键分歧和下一步动作。不要机械复述每个 Agent。"
+  }[mode] || "你是 Team Agent Marco 的一个 Agent。";
+  const notes = context.internalNotes?.length ? `Agent 讨论记录：\n\n${context.internalNotes.join("\n\n")}` : "";
+  return [`你是 ${name}。底层模型是 ${provider.label} / ${provider.model}。`, `你的角色：${role}。`, `你的表达性格：${personality}。`, custom, modePrompt, notes].filter(Boolean).join("\n\n");
 }
 
 async function verifyProvider(provider, apiKey, timeoutMs, quiet = false) {
@@ -105,7 +116,7 @@ async function callOpenAICompatible(provider, apiKey, systemPrompt, messages, ti
 }
 
 async function callOpenAIResponses(provider, apiKey, systemPrompt, messages, preferences) {
-  const response = await fetchWithTimeout(`${provider.baseUrl}/responses`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: provider.model, instructions: systemPrompt, input: messages.map(({ role, content }) => ({ role, content })), reasoning: { effort: preferences.reasoningEffort || "medium" }, max_output_tokens: preferences.maxOutputTokens }) }, preferences.timeoutMs);
+  const response = await fetchWithTimeout(`${provider.baseUrl}/responses`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: provider.model, instructions: systemPrompt, input: messages.map(({ role, content }) => ({ role, content })), reasoning: { effort: preferences.reasoningEffort || "low" }, max_output_tokens: preferences.maxOutputTokens }) }, preferences.timeoutMs);
   const data = await parseResponse(response, provider.label);
   const text = data.output_text?.trim() || (data.output || []).flatMap((item) => item.content || []).map((item) => item.text || "").join("").trim();
   if (!text) throw new Error(`${provider.label} 没有返回可显示的内容。`);

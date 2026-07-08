@@ -51,16 +51,33 @@ function store(name, mode = "readonly") {
   if (!database) throw new Error("浏览器存储尚未初始化。");
   return database.transaction(name, mode).objectStore(name);
 }
+
+function requestToPromise(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
 export function getRecord(name, key) { return requestToPromise(store(name).get(key)); }
 export function getAllRecords(name) { return requestToPromise(store(name).getAll()).then((value) => value || []); }
 export function putRecord(name, value) { return requestToPromise(store(name, "readwrite").put(value)); }
 export function removeRecord(name, key) { return requestToPromise(store(name, "readwrite").delete(key)); }
-function requestToPromise(request) { return new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
 
 export async function loadPreferences() {
-  const defaults = { id: "preferences", primaryProviderId: "deepseek", consultExperts: true, showProcess: true, maxOutputTokens: 4000, timeoutMs: 120000 };
+  const defaults = {
+    id: "preferences",
+    primaryProviderId: "deepseek",
+    consultExperts: true,
+    debateMode: true,
+    debateRounds: 2,
+    showProcess: true,
+    maxOutputTokens: 4000,
+    timeoutMs: 120000
+  };
   return { ...defaults, ...((await getRecord("settings", "preferences")) || {}) };
 }
+
 export async function savePreferences(preferences) { await putRecord("settings", { id: "preferences", ...preferences }); }
 export async function loadProviders() { return (await getRecord("settings", "providers"))?.items || []; }
 export async function saveProviders(items) { await putRecord("settings", { id: "providers", items }); }
@@ -77,14 +94,20 @@ async function getVaultKey() {
   await putRecord("vault", { id: "crypto-key", key });
   return key;
 }
+
 export async function saveProviderSecret(providerId, secret, remember) {
   sessionStorage.removeItem(`team-agent-key:${providerId}`);
-  if (!remember) { sessionStorage.setItem(`team-agent-key:${providerId}`, secret); await removeRecord("vault", `secret:${providerId}`); return; }
+  if (!remember) {
+    sessionStorage.setItem(`team-agent-key:${providerId}`, secret);
+    await removeRecord("vault", `secret:${providerId}`);
+    return;
+  }
   const key = await getVaultKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(secret));
   await putRecord("vault", { id: `secret:${providerId}`, iv: bytesToBase64(iv), ciphertext: bytesToBase64(new Uint8Array(ciphertext)) });
 }
+
 export async function readProviderSecret(providerId, providerLabel = providerId) {
   const session = sessionStorage.getItem(`team-agent-key:${providerId}`);
   if (session) return session;
@@ -94,6 +117,19 @@ export async function readProviderSecret(providerId, providerLabel = providerId)
   const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64ToBytes(record.iv) }, key, base64ToBytes(record.ciphertext));
   return new TextDecoder().decode(plaintext);
 }
-export async function removeProviderSecret(providerId) { sessionStorage.removeItem(`team-agent-key:${providerId}`); await removeRecord("vault", `secret:${providerId}`); }
-function bytesToBase64(bytes) { let binary = ""; bytes.forEach((byte) => binary += String.fromCharCode(byte)); return btoa(binary); }
-function base64ToBytes(value) { const binary = atob(value); return Uint8Array.from(binary, (char) => char.charCodeAt(0)); }
+
+export async function removeProviderSecret(providerId) {
+  sessionStorage.removeItem(`team-agent-key:${providerId}`);
+  await removeRecord("vault", `secret:${providerId}`);
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  bytes.forEach((byte) => binary += String.fromCharCode(byte));
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
