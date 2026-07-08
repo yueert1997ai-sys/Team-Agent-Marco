@@ -36,6 +36,7 @@ function bindEvents() {
   $("chatForm").onsubmit = sendMessage;
   $("chatInput").oninput = resizeInput;
   $("chatInput").onkeydown = (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("chatForm").requestSubmit(); } };
+  $("exportMarkdownButton").onclick = exportCurrentMarkdown;
   document.querySelectorAll(".suggestions button").forEach((button) => button.onclick = () => fillSuggestion(button.textContent));
   $("toggleKeyButton").onclick = toggleKeyVisibility;
   $("providerHint").onchange = toggleCustomFields;
@@ -70,7 +71,7 @@ async function sendMessage(event) {
   conversation.updatedAt = userMessage.createdAt;
   appendMessage(userMessage);
   $("chatInput").value = "";
-  resizeInput();
+  resizeInput(true);
   addProcess("input", "收到任务", text, "done");
   setStatus(`${agentName(primary)} 正在拆题`);
   const thinking = appendThinking(agentName(primary));
@@ -172,7 +173,7 @@ function renderProviders() {
   if (!providers.length) { box.innerHTML = `<div class="inline-message">还没有连接模型。你可以先添加 DeepSeek 或智谱 GLM。</div>`; return; }
   box.innerHTML = providers.map((provider) => {
     const isPrimary = provider.id === preferences.primaryProviderId;
-    return `<div class="provider-row"><div class="provider-title"><div class="agent-inline"><span class="avatar">${escapeHtml(agentAvatar(provider.id))}</span><div><strong>${escapeHtml(agentName(provider))}${isPrimary ? '<span class="primary-tag">总控</span>' : ""}</strong><small>${escapeHtml(provider.label)} · ${escapeHtml(provider.baseUrl)}</small></div></div></div><input class="provider-model" data-provider="${escapeHtml(provider.id)}" value="${escapeHtml(provider.model)}" aria-label="模型名称">${isPrimary ? '<span></span>' : `<button class="set-primary" data-provider="${escapeHtml(provider.id)}">设为总控</button>`}<button class="danger remove-provider" data-provider="${escapeHtml(provider.id)}">移除</button></div>`;
+    return `<div class="provider-row"><div class="provider-title"><div class="agent-inline"><span class="avatar">${escapeHtml(agentAvatar(provider.id))}</span><div><strong>${escapeHtml(agentName(provider))}${isPrimary ? '<span class="primary-tag">总控</span>' : ""}</strong><small>${escapeHtml(provider.label)} · ${escapeHtml(provider.baseUrl)}</small></div></div></div><input class="provider-model" data-provider="${escapeHtml(provider.id)}" value="${escapeHtml(provider.model)}" aria-label="模型名称">${isPrimary ? "<span></span>" : `<button class="set-primary" data-provider="${escapeHtml(provider.id)}">设为总控</button>`}<button class="danger remove-provider" data-provider="${escapeHtml(provider.id)}">移除</button></div>`;
   }).join("");
   box.querySelectorAll(".provider-model").forEach((input) => input.onchange = async () => { providers = providers.map((provider) => provider.id === input.dataset.provider ? { ...provider, model: input.value.trim() || provider.model } : provider); await saveProviders(providers); renderPrimaryState(); toast("模型名已更新"); });
   box.querySelectorAll(".set-primary").forEach((button) => button.onclick = async () => { preferences.primaryProviderId = button.dataset.provider; await savePreferences(preferences); renderProviders(); renderPrimaryState(); toast("总控已切换"); });
@@ -184,7 +185,7 @@ function renderAgentProfiles() {
   if (!providers.length) { box.innerHTML = `<div class="inline-message">先去“模型接入”添加 API。这里只显示已经接入的模型。</div>`; return; }
   box.innerHTML = providers.map((provider) => {
     const agent = getAgent(provider.id, provider);
-    return `<article class="agent-card" data-agent="${escapeHtml(provider.id)}"><div class="agent-card-head"><strong>${escapeHtml(agent.displayName || provider.label)}</strong><small>${escapeHtml(provider.label)} · ${escapeHtml(provider.model)}</small></div><label>头像 / 代号<input data-field="avatar" maxlength="4" value="${escapeHtml(agent.avatar || "")}" placeholder="D"></label><label>名字<input data-field="displayName" value="${escapeHtml(agent.displayName || "")}"></label><label>定位<input data-field="role" value="${escapeHtml(agent.role || "")}"></label><label>性格<textarea data-field="personality" rows="2">${escapeHtml(agent.personality || "")}</textarea></label><label>自定义提示词<textarea data-field="systemPrompt" rows="4">${escapeHtml(agent.systemPrompt || "")}</textarea></label></article>`;
+    return `<article class="agent-card" data-agent="${escapeHtml(provider.id)}"><div class="agent-card-head"><div class="agent-inline"><span class="avatar">${escapeHtml(agentAvatar(provider.id))}</span><strong>${escapeHtml(agent.displayName || provider.label)}</strong></div><small>${escapeHtml(provider.label)} · ${escapeHtml(provider.model)}</small></div><label>头像 / 代号<input data-field="avatar" maxlength="4" value="${escapeHtml(agent.avatar || "")}" placeholder="D"></label><label>名字<input data-field="displayName" value="${escapeHtml(agent.displayName || "")}"></label><label>定位<input data-field="role" value="${escapeHtml(agent.role || "")}"></label><label>性格<textarea data-field="personality" rows="2">${escapeHtml(agent.personality || "")}</textarea></label><label>自定义提示词<textarea data-field="systemPrompt" rows="4">${escapeHtml(agent.systemPrompt || "")}</textarea></label></article>`;
   }).join("");
 }
 
@@ -201,7 +202,7 @@ async function getOrCreateConversation(firstText) { if (activeConversationId) { 
 function createMessage(role, content) { return { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString() }; }
 async function loadConversationList() { const items = await listConversations(); const box = $("conversationList"); box.innerHTML = items.length ? items.map((item) => `<button class="conversation-item${item.id === activeConversationId ? " active" : ""}" data-id="${item.id}">${escapeHtml(item.title || "新对话")}</button>`).join("") : `<small>还没有对话</small>`; box.querySelectorAll(".conversation-item").forEach((button) => button.onclick = () => openConversation(button.dataset.id)); }
 async function openConversation(id) { const conversation = await getConversation(id); if (!conversation) return; activeConversationId = id; $("conversationTitle").textContent = conversation.title; $("messages").replaceChildren(); clearProcess(); conversation.messages.forEach((message) => appendMessage(message)); showPage("chat"); await loadConversationList(); }
-function newChat() { activeConversationId = null; $("conversationTitle").textContent = "新对话"; const primary = getPrimaryProvider(); clearProcess(); $("messages").innerHTML = `<div id="welcome" class="welcome"><div class="lab-stamp">MARCO / AGENT DESK</div><h2>直接说事。</h2><p id="welcomeSubtitle">${primary ? `${escapeHtml(agentName(primary))} 负责最终回答，其他 Agent 会在右侧显示发言。` : "添加模型后即可开始。"}</p><div class="suggestions"><button>让老D和智谱参谋一起判断这个项目下一步</button><button>把我的想法拆成产品计划和风险清单</button><button>让所有 Agent 先吵一轮再给结论</button></div></div>`; document.querySelectorAll(".suggestions button").forEach((button) => button.onclick = () => fillSuggestion(button.textContent)); renderPrimaryState(); showPage("chat"); loadConversationList(); }
+function newChat() { activeConversationId = null; $("conversationTitle").textContent = "新对话"; const primary = getPrimaryProvider(); clearProcess(); $("messages").innerHTML = `<div id="welcome" class="welcome"><div class="lab-stamp">MARCO / AGENT DESK</div><h2>直接说事。</h2><p id="welcomeSubtitle">${primary ? `${escapeHtml(agentName(primary))} 负责最终回答，其他 Agent 会在右侧显示发言。` : "添加模型后即可开始。"}</p><div class="suggestions"><button>让老D和智谱参谋一起判断这个项目下一步</button><button>把我的想法拆成产品计划和风险清单</button><button>让所有 Agent 先吵一轮再给结论</button></div></div>`; document.querySelectorAll(".suggestions button").forEach((button) => button.onclick = () => fillSuggestion(button.textContent)); renderPrimaryState(); showPage("chat"); loadConversationList(); resizeInput(true); }
 function appendMessage(message, consulted = [], usage = 0) { const node = document.createElement("article"); node.className = `message ${message.role}`; const meta = message.role === "assistant" && (consulted.length || usage) ? `<div class="message-meta">${consulted.length ? `参考：${escapeHtml(consulted.join("、"))}` : ""}${consulted.length && usage ? " · " : ""}${usage ? `${usage} tokens` : ""}</div>` : ""; node.innerHTML = `<div class="message-body"><div class="bubble">${escapeHtml(message.content)}</div>${meta}</div>`; $("messages").append(node); $("messages").scrollTop = $("messages").scrollHeight; return node; }
 function appendThinking(label) { return appendMessage(createMessage("assistant", `${label} 正在思考…`)); }
 function clearProcess() { processCounter = 0; $("processList").innerHTML = `<div class="process-empty">等待 Agent 发言。</div>`; }
@@ -210,7 +211,31 @@ function updateProcess(id, content, state = "done") { if (!id) return; const nod
 function stateLabel(state) { return state === "running" ? "进行中" : state === "error" ? "失败" : state === "done" ? "完成" : "等待"; }
 function setStatus(text) { $("chatStatus").textContent = text; }
 function showDetectMessage(text, error = false) { const box = $("detectMessage"); box.textContent = text; box.className = `inline-message${error ? " error" : ""}`; box.classList.remove("hidden"); }
-function resizeInput() { const input = $("chatInput"); input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight, 360)}px`; }
+function resizeInput(force = false) { const input = $("chatInput"); if (!input) return; const minHeight = 96; const maxHeight = 360; const currentHeight = input.offsetHeight || minHeight; if (!input.value || force) { input.style.height = `${minHeight}px`; return; } const targetHeight = Math.max(minHeight, Math.min(input.scrollHeight, maxHeight)); if (currentHeight > targetHeight && currentHeight <= maxHeight) return; input.style.height = `${targetHeight}px`; }
 function clampInteger(value, min, max, fallback) { const parsed = Number(value); return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback; }
 function readError(error) { return error?.message || String(error); }
 function toast(text, error = false) { const box = $("toast"); box.textContent = text; box.className = `toast${error ? " error" : ""}`; box.classList.remove("hidden"); setTimeout(() => box.classList.add("hidden"), 3200); }
+
+async function exportCurrentMarkdown() {
+  const conversation = activeConversationId ? await getConversation(activeConversationId) : null;
+  if (!conversation?.messages?.length) { toast("当前对话还没有可导出的内容。", true); return; }
+  const lines = [
+    `# ${conversation.title || "Team Agent Marco Conversation"}`,
+    "",
+    `- Created: ${conversation.createdAt}`,
+    `- Updated: ${conversation.updatedAt}`,
+    "",
+    ...conversation.messages.flatMap((message) => [`## ${message.role === "user" ? "User" : "Agent"}`, "", message.content, ""])
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeFileName(conversation.title || "team-agent-marco")}.md`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  toast("已导出 Markdown");
+}
+function safeFileName(value) { return String(value).trim().replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "team-agent-marco"; }
