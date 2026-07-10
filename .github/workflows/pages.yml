@@ -3,9 +3,10 @@ name: Deploy HTML web app
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/council-mvp]
+    branches: [main]
     paths:
       - "web/**"
+      - "tests/web-html.test.mjs"
       - ".github/workflows/pages.yml"
 
 permissions:
@@ -18,7 +19,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: npm install
+      - name: Web tests
+        run: node --test tests/web-html.test.mjs
+
   deploy:
+    needs: test
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

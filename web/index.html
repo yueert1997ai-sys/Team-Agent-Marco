@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#ffffff">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'self'; frame-ancestors 'none'">
   <title>Marco Lab</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
@@ -24,18 +24,22 @@
   <main class="main-area">
     <section id="chatPage" class="page active">
       <header class="topbar">
-        <div><h1 id="conversationTitle">新对话</h1><p id="chatStatus">老D 将作为当前总控</p></div>
-        <div class="top-actions"><button id="exportMarkdownButton" class="text-button" type="button">导出 Markdown</button><span id="primaryModelBadge" class="model-badge">老D</span></div>
+        <div><h1 id="conversationTitle">新对话</h1><p id="chatStatus">等待任务</p></div>
+        <div class="top-actions">
+          <button id="stopButton" class="stop-button hidden" type="button">停止</button>
+          <button id="exportMarkdownButton" class="text-button" type="button">导出 Markdown</button>
+          <span id="primaryModelBadge" class="model-badge">未连接</span>
+        </div>
       </header>
       <div id="messages" class="messages">
         <div id="welcome" class="welcome">
           <div class="lab-stamp">MARCO / AGENT DESK</div>
           <h2>直接说事。</h2>
-          <p id="welcomeSubtitle">老D 负责最终回答，碰撞模式会在右侧显示每轮发言。</p>
+          <p id="welcomeSubtitle">添加模型后即可开始。</p>
           <div class="suggestions">
-            <button>让老D和智谱参谋进行两轮碰撞后给结论</button>
-            <button>把我的想法拆成产品计划和风险清单</button>
-            <button>让所有 Agent 先互相反驳再给我结果</button>
+            <button>让老D和智谱参谋碰撞后给结论</button>
+            <button>快速判断这个项目下一步</button>
+            <button>让参谋先审查，再由总控回答</button>
           </div>
         </div>
       </div>
@@ -49,48 +53,67 @@
     </section>
 
     <section id="settingsPage" class="page">
-      <header class="topbar"><div><h1>模型接入</h1><p>添加 API，选择总控。DeepSeek 默认叫老D。</p></div><button class="text-button backToChatButton">返回</button></header>
+      <header class="topbar"><div><h1>模型接入</h1><p>添加 API、选择总控和运行模式。</p></div><button class="text-button backToChatButton">返回</button></header>
       <div class="settings-shell">
         <section class="settings-section">
           <h2>添加 API</h2>
-          <p>自动识别失败时，直接手动指定平台；智谱 GLM 和任意 OpenAI 兼容接口都能接。</p>
+          <p>为了保护 Key，DeepSeek、智谱等平台请先手动选择。系统不会再拿一个 Key 轮流试探多个平台。</p>
           <div class="form-grid">
             <label class="wide">API Key<input id="universalApiKey" type="password" autocomplete="off" placeholder="粘贴 API Key"></label>
-            <label>平台提示<select id="providerHint"><option value="auto">自动识别</option><option value="deepseek">DeepSeek</option><option value="zhipu">智谱 GLM</option><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option><option value="custom">其他 OpenAI 兼容接口</option></select></label>
+            <label>平台
+              <select id="providerHint">
+                <option value="auto">安全自动识别（仅特征明确的 Key）</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="zhipu">智谱 GLM</option>
+                <option value="openai">OpenAI</option>
+                <option value="gemini">Google Gemini</option>
+                <option value="custom">其他 OpenAI 兼容接口</option>
+              </select>
+            </label>
             <label id="customLabelField" class="custom-field hidden">名称<input id="customLabel" placeholder="例如 Kimi"></label>
             <label id="customBaseUrlField" class="custom-field hidden">Base URL<input id="customBaseUrl" placeholder="https://example.com/v1"></label>
             <label id="customModelField" class="custom-field hidden">模型名<input id="customModel" placeholder="model-name"></label>
           </div>
-          <div class="add-actions"><label class="remember-row"><input id="rememberKey" type="checkbox" checked> 在当前浏览器加密保存</label><div><button id="toggleKeyButton" class="text-button" type="button">显示 Key</button><button id="detectKeyButton" class="primary-button" type="button">连接</button></div></div>
+          <div class="add-actions">
+            <label class="remember-row"><input id="rememberKey" type="checkbox" checked> 保存在当前设备（网页运行时可读取）</label>
+            <div><button id="toggleKeyButton" class="text-button" type="button">显示 Key</button><button id="detectKeyButton" class="primary-button" type="button">测试并连接</button></div>
+          </div>
           <div id="detectMessage" class="inline-message hidden"></div>
         </section>
 
         <section class="settings-section">
-          <div class="section-head"><div><h2>已连接模型</h2><p>可以把任意模型设为总控。默认优先老D。</p></div><span id="storageBadge">本地存储</span></div>
+          <div class="section-head"><div><h2>已连接模型</h2><p>可以修改模型名或切换总控。</p></div><span id="storageBadge">本地设备</span></div>
           <div id="providerList" class="provider-list"></div>
         </section>
 
         <section class="settings-section">
-          <h2>聊天偏好</h2>
+          <h2>运行模式</h2>
           <div class="preference-list">
-            <label class="switch-row"><span><strong>调用辅助 Agent</strong><small>其他已连接模型参与分析</small></span><input id="consultExperts" type="checkbox" checked></label>
-            <label class="switch-row"><span><strong>Agent 碰撞模式</strong><small>老D和智谱先初判，再互相反驳修正，最后总控整合</small></span><input id="debateMode" type="checkbox" checked></label>
+            <label>模式
+              <select id="runMode">
+                <option value="quick">快速模式：总控直接回答</option>
+                <option value="advisor">参谋模式：辅助分析后总控回答</option>
+                <option value="debate">深度碰撞：初判、修正、最终整合</option>
+              </select>
+            </label>
             <label>碰撞轮数<select id="debateRounds"><option value="1">1 轮：独立初判</option><option value="2">2 轮：初判 + 反驳修正</option></select></label>
-            <label class="switch-row"><span><strong>显示过程面板</strong><small>展示 Agent 工作发言和整合步骤</small></span><input id="showProcess" type="checkbox" checked></label>
-            <label>单次输出上限<input id="maxOutputTokens" type="number" min="100" max="128000" value="4000"></label>
-            <label>请求超时（毫秒）<input id="timeoutMs" type="number" min="5000" max="600000" value="120000"></label>
+            <label>最多参与 Agent 数<input id="maxDebateAgents" type="number" min="1" max="6" value="2"></label>
+            <label class="switch-row"><span><strong>显示过程面板</strong><small>保存并展示 Agent 工作发言</small></span><input id="showProcess" type="checkbox" checked></label>
+            <label>最终输出上限<input id="maxOutputTokens" type="number" min="100" max="128000" value="4000"></label>
+            <label>单次请求超时（毫秒）<input id="timeoutMs" type="number" min="5000" max="600000" value="120000"></label>
           </div>
+          <div id="runEstimate" class="run-estimate">预计调用次数将在这里显示</div>
           <button id="savePreferencesButton" class="primary-button" type="button">保存</button>
         </section>
       </div>
     </section>
 
     <section id="agentsPage" class="page">
-      <header class="topbar"><div><h1>Agent 定制</h1><p>给已接入模型起名字、定性格、写系统提示词。</p></div><button class="text-button backToChatButton">返回</button></header>
+      <header class="topbar"><div><h1>Agent 定制</h1><p>给已接入模型设置头像、角色和提示词。</p></div><button class="text-button backToChatButton">返回</button></header>
       <div class="settings-shell">
         <section class="settings-section">
           <h2>你的 Agent 团队</h2>
-          <p>这里只显示已接入 API 的模型。这里写的名字、头像、性格和提示词会进入真实请求。</p>
+          <p>只有已接入 API 的模型会显示。可以关闭某个 Agent 的“参与多 Agent 任务”。</p>
           <div id="agentProfileList" class="agent-profile-list"></div>
           <button id="saveAgentsButton" class="primary-button" type="button">保存 Agent 配置</button>
         </section>
@@ -99,7 +122,7 @@
   </main>
 
   <aside id="processPanel" class="process-panel">
-    <div class="process-head"><strong>WORKLOG</strong><small id="processHint">Agent 碰撞过程会显示在这里</small></div>
+    <div class="process-head"><strong>WORKLOG</strong><small id="processHint">过程会随会话保存</small></div>
     <div id="processList" class="process-list"><div class="process-empty">等待任务。</div></div>
   </aside>
 </div>

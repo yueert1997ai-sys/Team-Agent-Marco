@@ -20,13 +20,25 @@ import {
   detectProvider,
   generatePrimary
 } from "./providers.js";
+import {
+  addRunStep,
+  buildRoundContext,
+  createRun,
+  estimateCallCount,
+  finishRun,
+  normalizeRunMode,
+  selectParticipants,
+  updateRunStep
+} from "./orchestrator.js";
 
 let preferences;
 let providers = [];
 let agentProfiles = {};
 let activeConversationId = null;
+let activeRunContext = null;
 let sending = false;
-let processCounter = 0;
+let persistQueue = Promise.resolve();
+
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
@@ -35,17 +47,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   preferences = await loadPreferences();
   providers = normalizeProviders(await loadProviders());
   agentProfiles = await loadAgentProfiles();
-  if (providers.some((provider) => provider.id === "deepseek") && !providers.some((provider) => provider.id === preferences.primaryProviderId)) {
-    preferences.primaryProviderId = "deepseek";
-    await savePreferences(preferences);
-  }
+  repairPrimaryProvider();
   bindEvents();
   renderSettings();
   renderPrimaryState();
   renderAgentProfiles();
   await loadConversationList();
   resizeInput(true);
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => undefined);
+  registerServiceWorker();
 });
 
 function bindEvents() {
@@ -61,13 +70,17 @@ function bindEvents() {
       $("chatForm").requestSubmit();
     }
   };
-  $("exportMarkdownButton")?.addEventListener("click", exportCurrentMarkdown);
+  $("stopButton").onclick = stopCurrentRun;
+  $("exportMarkdownButton").onclick = exportCurrentMarkdown;
   document.querySelectorAll(".suggestions button").forEach((button) => button.onclick = () => fillSuggestion(button.textContent));
   $("toggleKeyButton").onclick = toggleKeyVisibility;
   $("providerHint").onchange = toggleCustomFields;
   $("detectKeyButton").onclick = detectAndSaveKey;
   $("savePreferencesButton").onclick = persistPreferences;
   $("saveAgentsButton").onclick = persistAgents;
+  $("runMode").onchange = renderRunEstimate;
+  $("debateRounds").onchange = renderRunEstimate;
+  $("maxDebateAgents").onchange = renderRunEstimate;
 }
 
 function showPage(page) {
@@ -77,12 +90,6 @@ function showPage(page) {
   if (page === "agents") renderAgentProfiles();
 }
 
-function fillSuggestion(text) {
-  $("chatInput").value = text;
-  resizeInput(false);
-  $("chatInput").focus();
-}
-
 async function sendMessage(event) {
   event.preventDefault();
   const text = $("chatInput").value.trim();
@@ -90,132 +97,176 @@ async function sendMessage(event) {
   const primary = getPrimaryProvider();
   if (!primary) {
     showPage("settings");
-    toast("请先连接一个模型。DeepSeek 会优先成为总控。", true);
+    toast("请先连接一个模型。", true);
     return;
   }
 
   sending = true;
-  $("sendButton").disabled = true;
-  $("welcome")?.classList.add("hidden");
-  clearProcess();
   const conversation = await getOrCreateConversation(text);
+  const conversationId = conversation.id;
   const userMessage = createMessage("user", text);
   conversation.messages.push(userMessage);
   conversation.updatedAt = userMessage.createdAt;
-  appendMessage(userMessage);
-  $("chatInput").value = "";
-  resizeInput(true);
+  await saveConversation(conversation);
+
+  const mode = normalizeRunMode(preferences.runMode);
+  const participants = selectParticipants({ providers, primaryId: primary.id, agentProfiles, maxAgents: preferences.maxDebateAgents });
+  const run = createRun({ conversationId, mode, participants });
+  conversation.runs.push(run);
+  const controller = new AbortController();
+  activeRunContext = { conversation, conversationId, run, controller };
+  await saveConversation(conversation);
+
+  if (activeConversationId === conversationId) {
+    $("welcome")?.classList.add("hidden");
+    appendMessage(userMessage);
+    $("chatInput").value = "";
+    resizeInput(true);
+    clearProcess();
+  }
+  updateRunControls();
   addProcess("input", "收到任务", text, "done");
-  setStatus(`${agentName(primary)} 正在拆题`);
-  const thinking = appendThinking(agentName(primary));
+  addProcess("system", "运行计划", describeRunPlan(mode, participants.length), "done");
+  setStatusForConversation(conversationId, `${agentName(primary)} 正在执行 ${modeLabel(mode)}`);
+  const thinking = activeConversationId === conversationId ? appendThinking(agentName(primary)) : null;
 
   try {
-    const { internalNotes, consulted } = await buildInternalNotes(primary, conversation.messages);
-    const primaryStep = addProcess(primary.id, `${agentName(primary)} 最终整合`, internalNotes.length ? "正在阅读 Agent 碰撞记录…" : "无辅助 Agent，直接生成回答…", "running");
-    setStatus(`${agentName(primary)} 正在组织最终回复`);
-    const final = await generatePrimary({ provider: primary, messages: conversation.messages, internalNotes, preferences, agent: getAgent(primary.id) });
-    updateProcess(primaryStep, final.text, "done");
+    const { internalNotes, consulted } = await executeInternalWorkflow({ mode, primary, participants, messages: conversation.messages, signal: controller.signal });
+    assertNotAborted(controller.signal);
+    const stepId = addProcess(primary.id, `${agentName(primary)} 最终整合`, internalNotes.length ? "正在阅读完整讨论记录…" : "直接生成回答…", "running");
+    const final = await generatePrimary({ provider: primary, messages: conversation.messages, internalNotes, preferences, agent: getAgent(primary.id), signal: controller.signal });
+    updateProcess(stepId, final.text, "done", final);
+
     const assistantMessage = createMessage("assistant", final.text);
     conversation.messages.push(assistantMessage);
     conversation.updatedAt = assistantMessage.createdAt;
+    finishRun(run, { status: "completed" });
     await saveConversation(conversation);
-    thinking.remove();
-    appendMessage(assistantMessage, consulted, final.usage);
-    $("conversationTitle").textContent = conversation.title;
-    setStatus(consulted.length ? `${agentName(primary)} 已参考 ${consulted.join("、")}` : `${agentName(primary)} 已回答`);
+
+    if (activeConversationId === conversationId) {
+      thinking?.remove();
+      appendMessage(assistantMessage, consulted, run.usage);
+      $("conversationTitle").textContent = conversation.title;
+      renderWorklog(run);
+      setStatus(`${agentName(primary)} 已完成 · ${run.usage.calls} 次调用 · ${run.usage.totalTokens || 0} tokens`);
+    }
     await loadConversationList();
   } catch (error) {
-    thinking.remove();
-    addProcess("error", "运行失败", readError(error), "error");
-    appendMessage(createMessage("assistant", `运行失败：${readError(error)}`));
-    setStatus("发送失败");
+    const cancelled = isAbortError(error) || controller.signal.aborted;
+    finishRun(run, { status: cancelled ? "cancelled" : "failed", error: cancelled ? null : readError(error) });
+    if (cancelled) {
+      addProcess("system", "任务已停止", "当前工作流已取消，已完成的步骤仍保存在 WORKLOG。", "done");
+    } else {
+      addProcess("error", "运行失败", readError(error), "error");
+      const failureMessage = createMessage("assistant", `运行失败：${readError(error)}`);
+      conversation.messages.push(failureMessage);
+      conversation.updatedAt = failureMessage.createdAt;
+      if (activeConversationId === conversationId) appendMessage(failureMessage);
+    }
+    await saveConversation(conversation);
+    if (activeConversationId === conversationId) {
+      thinking?.remove();
+      renderWorklog(run);
+      setStatus(cancelled ? "已停止生成" : "发送失败");
+    }
   } finally {
+    if (activeRunContext?.run.id === run.id) activeRunContext = null;
     sending = false;
-    $("sendButton").disabled = false;
+    updateRunControls();
     $("chatInput").focus();
   }
 }
 
-async function buildInternalNotes(primary, messages) {
-  if (!preferences.consultExperts) return { internalNotes: [], consulted: [] };
-  if (preferences.debateMode) return runDebate(primary, messages);
-  return runOneShotConsult(primary, messages);
-}
-
-async function runOneShotConsult(primary, messages) {
-  const internalNotes = [];
-  const consulted = [];
-  const experts = providers.filter((provider) => provider.id !== primary.id);
-  if (!experts.length) return { internalNotes, consulted };
-  setStatus("辅助 Agent 并行分析中");
-  await Promise.all(experts.map(async (provider) => {
-    const step = addProcess(provider.id, `${agentName(provider)} 发言`, "等待接口返回…", "running");
-    try {
-      const result = await consultProvider(provider, messages, preferences.timeoutMs, getAgent(provider.id));
-      updateProcess(step, result.text || "没有有效内容", "done");
-      if (result?.text) {
-        internalNotes.push(`${agentName(provider)}（${getAgent(provider.id).role || provider.label}）：${result.text}`);
-        consulted.push(agentName(provider));
-      }
-    } catch (error) {
-      updateProcess(step, readError(error), "error");
-    }
-  }));
-  return { internalNotes, consulted };
-}
-
-async function runDebate(primary, messages) {
-  const participants = orderParticipants(primary);
-  const internalNotes = [];
-  const consulted = [];
-  if (participants.length < 2) {
-    addProcess("system", "未启用碰撞", "只有一个已接入模型，自动退化为单 Agent 直接回答。", "done");
-    return { internalNotes, consulted };
+async function executeInternalWorkflow({ mode, primary, participants, messages, signal }) {
+  if (mode === "quick" || participants.length < 2) {
+    if (participants.length < 2 && mode !== "quick") addProcess("system", "单模型降级", "只有一个可用 Agent，本次直接由总控回答。", "done");
+    return { internalNotes: [], consulted: [] };
   }
-
-  setStatus("Agent 碰撞 Round 1：独立初判");
-  const round1 = await runDebateRound(participants, messages, 1, []);
-  internalNotes.push(...round1.map(formatDebateNote));
-  round1.forEach((note) => consulted.push(note.name));
-
-  const rounds = clampInteger(preferences.debateRounds, 1, 2, 2);
-  if (rounds >= 2 && round1.length) {
-    setStatus("Agent 碰撞 Round 2：互相反驳和修正");
-    const round2 = await runDebateRound(participants, messages, 2, round1);
-    internalNotes.push(...round2.map(formatDebateNote));
-    round2.forEach((note) => consulted.push(note.name));
-  }
-
-  return { internalNotes, consulted: Array.from(new Set(consulted)) };
+  if (mode === "advisor") return runAdvisor(primary, participants, messages, signal);
+  return runDebate(participants, messages, signal);
 }
 
-async function runDebateRound(participants, messages, round, previousNotes) {
+async function runAdvisor(primary, participants, messages, signal) {
+  const experts = participants.filter((provider) => provider.id !== primary.id);
   const notes = [];
-  await Promise.all(participants.map(async (provider) => {
-    const title = round === 1 ? `${agentName(provider)} 初判` : `${agentName(provider)} 反驳 / 修正`;
-    const step = addProcess(provider.id, title, "等待接口返回…", "running");
+  await Promise.all(experts.map(async (provider) => {
+    const stepId = addProcess(provider.id, `${agentName(provider)} 参谋意见`, "等待接口返回…", "running");
     try {
-      const peerNotes = previousNotes
-        .filter((note) => note.providerId !== provider.id)
-        .map((note) => `${note.name}：${note.text}`);
-      const result = await debateProvider({ provider, messages, timeoutMs: preferences.timeoutMs, agent: getAgent(provider.id), round, peerNotes });
-      updateProcess(step, result.text || "没有有效内容", "done");
-      if (result?.text) notes.push({ providerId: provider.id, name: agentName(provider), round, text: result.text });
+      const result = await consultProvider({ provider, messages, timeoutMs: preferences.timeoutMs, agent: getAgent(provider.id), signal });
+      updateProcess(stepId, result.text, "done", result);
+      notes.push({ providerId: provider.id, name: agentName(provider), text: result.text, round: 1 });
     } catch (error) {
-      updateProcess(step, readError(error), "error");
+      updateProcess(stepId, readError(error), isAbortError(error) ? "cancelled" : "error");
+      if (isAbortError(error)) throw error;
     }
   }));
-  return participants
-    .map((provider) => notes.find((note) => note.providerId === provider.id))
-    .filter(Boolean);
+  return { internalNotes: notes.map(formatDebateNote), consulted: notes.map((note) => note.name) };
 }
 
-function orderParticipants(primary) {
-  return [primary, ...providers.filter((provider) => provider.id !== primary.id)];
+async function runDebate(participants, messages, signal) {
+  setStatusForCurrentRun("Round 1：独立初判");
+  const round1 = await runDebateRound(participants, messages, 1, [], signal);
+  const allNotes = [...round1];
+  if (Number(preferences.debateRounds) >= 2 && round1.length) {
+    setStatusForCurrentRun("Round 2：互相反驳和修正");
+    const round2 = await runDebateRound(participants, messages, 2, round1, signal);
+    allNotes.push(...round2);
+  }
+  return {
+    internalNotes: allNotes.map(formatDebateNote),
+    consulted: Array.from(new Set(allNotes.map((note) => note.name)))
+  };
 }
 
-function formatDebateNote(note) {
-  return `Round ${note.round} · ${note.name}\n${note.text}`;
+async function runDebateRound(participants, messages, round, previousNotes, signal) {
+  const results = await Promise.all(participants.map(async (provider) => {
+    const title = round === 1 ? `${agentName(provider)} 初判` : `${agentName(provider)} 反驳 / 修正`;
+    const stepId = addProcess(provider.id, title, "等待接口返回…", "running");
+    const { ownNote, peerNotes } = buildRoundContext({ providerId: provider.id, previousNotes });
+    try {
+      const result = await debateProvider({ provider, messages, timeoutMs: preferences.timeoutMs, agent: getAgent(provider.id), round, ownNote, peerNotes, signal });
+      updateProcess(stepId, result.text, "done", result);
+      return { providerId: provider.id, name: agentName(provider), round, text: result.text, usage: result.usage, elapsedMs: result.elapsedMs };
+    } catch (error) {
+      updateProcess(stepId, readError(error), isAbortError(error) ? "cancelled" : "error");
+      if (isAbortError(error)) throw error;
+      return null;
+    }
+  }));
+  return results.filter(Boolean);
+}
+
+function addProcess(providerId, title, content, state = "pending", result = {}) {
+  if (!activeRunContext) return null;
+  const step = addRunStep(activeRunContext.run, { providerId, title, content, state, usage: result.usage || 0, elapsedMs: result.elapsedMs || 0 });
+  queueConversationSave(activeRunContext.conversation);
+  if (activeConversationId === activeRunContext.conversationId && preferences.showProcess) renderProcessStep(step);
+  return step.id;
+}
+
+function updateProcess(stepId, content, state = "done", result = {}) {
+  if (!activeRunContext || !stepId) return;
+  const step = updateRunStep(activeRunContext.run, stepId, {
+    content,
+    state,
+    usage: result.usage || 0,
+    elapsedMs: result.elapsedMs || 0,
+    completedAt: new Date().toISOString()
+  });
+  queueConversationSave(activeRunContext.conversation);
+  if (step && activeConversationId === activeRunContext.conversationId && preferences.showProcess) updateProcessNode(step);
+}
+
+function queueConversationSave(conversation) {
+  persistQueue = persistQueue.catch(() => undefined).then(() => saveConversation(conversation));
+  return persistQueue;
+}
+
+function stopCurrentRun() {
+  if (!activeRunContext || activeRunContext.controller.signal.aborted) return;
+  activeRunContext.controller.abort();
+  $("stopButton").disabled = true;
+  setStatusForCurrentRun("正在停止…");
 }
 
 async function detectAndSaveKey() {
@@ -238,27 +289,30 @@ async function detectAndSaveKey() {
     renderProviders();
     renderPrimaryState();
     renderAgentProfiles();
+    renderRunEstimate();
     toast(`${detected.label} 已连接`);
   } catch (error) {
     showDetectMessage(readError(error), true);
   } finally {
     button.disabled = false;
-    button.textContent = "连接";
+    button.textContent = "测试并连接";
   }
 }
 
 async function persistPreferences() {
   preferences = {
     ...preferences,
-    consultExperts: $("consultExperts").checked,
-    debateMode: $("debateMode").checked,
+    runMode: normalizeRunMode($("runMode").value),
     debateRounds: clampInteger($("debateRounds").value, 1, 2, 2),
+    maxDebateAgents: clampInteger($("maxDebateAgents").value, 1, 6, 2),
     showProcess: $("showProcess").checked,
     maxOutputTokens: clampInteger($("maxOutputTokens").value, 100, 128000, 4000),
     timeoutMs: clampInteger($("timeoutMs").value, 5000, 600000, 120000)
   };
   await savePreferences(preferences);
   $("processPanel").classList.toggle("hidden", !preferences.showProcess);
+  renderPrimaryState();
+  renderRunEstimate();
   toast("已保存");
 }
 
@@ -271,7 +325,8 @@ async function persistAgents() {
       displayName: card.querySelector('[data-field="displayName"]').value.trim(),
       role: card.querySelector('[data-field="role"]').value.trim(),
       personality: card.querySelector('[data-field="personality"]').value.trim(),
-      systemPrompt: card.querySelector('[data-field="systemPrompt"]').value.trim()
+      systemPrompt: card.querySelector('[data-field="systemPrompt"]').value.trim(),
+      participatesInDebate: card.querySelector('[data-field="participatesInDebate"]').checked
     };
   });
   agentProfiles = next;
@@ -279,13 +334,14 @@ async function persistAgents() {
   renderProviders();
   renderPrimaryState();
   renderAgentProfiles();
+  renderRunEstimate();
   toast("Agent 配置已保存");
 }
 
 function renderSettings() {
-  $("consultExperts").checked = preferences.consultExperts;
-  $("debateMode").checked = preferences.debateMode;
+  $("runMode").value = normalizeRunMode(preferences.runMode);
   $("debateRounds").value = String(clampInteger(preferences.debateRounds, 1, 2, 2));
+  $("maxDebateAgents").value = String(clampInteger(preferences.maxDebateAgents, 1, 6, 2));
   $("showProcess").checked = preferences.showProcess;
   $("maxOutputTokens").value = preferences.maxOutputTokens;
   $("timeoutMs").value = preferences.timeoutMs;
@@ -293,12 +349,13 @@ function renderSettings() {
   toggleCustomFields();
   renderProviders();
   renderPrimaryState();
+  renderRunEstimate();
 }
 
 function renderProviders() {
   const box = $("providerList");
   if (!providers.length) {
-    box.innerHTML = `<div class="inline-message">还没有连接模型。你可以先添加 DeepSeek 或智谱 GLM。</div>`;
+    box.innerHTML = `<div class="inline-message">还没有连接模型。添加时请先明确选择平台，避免 Key 被发往错误域名。</div>`;
     return;
   }
   box.innerHTML = providers.map((provider) => {
@@ -316,20 +373,19 @@ function renderProviders() {
     await savePreferences(preferences);
     renderProviders();
     renderPrimaryState();
+    renderRunEstimate();
     toast("总控已切换");
   });
   box.querySelectorAll(".remove-provider").forEach((button) => button.onclick = async () => {
     const removedId = button.dataset.provider;
     await removeProviderSecret(removedId);
     providers = providers.filter((provider) => provider.id !== removedId);
-    if (preferences.primaryProviderId === removedId) {
-      preferences.primaryProviderId = providers.find((provider) => provider.id === "deepseek")?.id || providers[0]?.id || "deepseek";
-      await savePreferences(preferences);
-    }
-    await saveProviders(providers);
+    repairPrimaryProvider();
+    await Promise.all([saveProviders(providers), savePreferences(preferences)]);
     renderProviders();
     renderPrimaryState();
     renderAgentProfiles();
+    renderRunEstimate();
     toast("已移除模型");
   });
 }
@@ -342,28 +398,96 @@ function renderAgentProfiles() {
   }
   box.innerHTML = providers.map((provider) => {
     const agent = getAgent(provider.id, provider);
-    return `<article class="agent-card" data-agent="${escapeHtml(provider.id)}"><div class="agent-card-head"><div class="agent-inline"><span class="avatar">${escapeHtml(agentAvatar(provider.id))}</span><strong>${escapeHtml(agent.displayName || provider.label)}</strong></div><small>${escapeHtml(provider.label)} · ${escapeHtml(provider.model)}</small></div><label>头像 / 代号<input data-field="avatar" maxlength="4" value="${escapeHtml(agent.avatar || "")}" placeholder="D"></label><label>名字<input data-field="displayName" value="${escapeHtml(agent.displayName || "")}"></label><label>定位<input data-field="role" value="${escapeHtml(agent.role || "")}"></label><label>性格<textarea data-field="personality" rows="2">${escapeHtml(agent.personality || "")}</textarea></label><label>自定义提示词<textarea data-field="systemPrompt" rows="4">${escapeHtml(agent.systemPrompt || "")}</textarea></label></article>`;
+    return `<article class="agent-card" data-agent="${escapeHtml(provider.id)}"><div class="agent-card-head"><div class="agent-inline"><span class="avatar">${escapeHtml(agentAvatar(provider.id))}</span><strong>${escapeHtml(agent.displayName || provider.label)}</strong></div><small>${escapeHtml(provider.label)} · ${escapeHtml(provider.model)}</small></div><label class="switch-row compact"><span><strong>参与多 Agent 任务</strong><small>关闭后仅在它被设为总控时调用</small></span><input data-field="participatesInDebate" type="checkbox" ${agent.participatesInDebate !== false ? "checked" : ""}></label><label>头像 / 代号<input data-field="avatar" maxlength="4" value="${escapeHtml(agent.avatar || "")}" placeholder="D"></label><label>名字<input data-field="displayName" value="${escapeHtml(agent.displayName || "")}"></label><label>定位<input data-field="role" value="${escapeHtml(agent.role || "")}"></label><label>性格<textarea data-field="personality" rows="2">${escapeHtml(agent.personality || "")}</textarea></label><label>自定义提示词<textarea data-field="systemPrompt" rows="4">${escapeHtml(agent.systemPrompt || "")}</textarea></label></article>`;
   }).join("");
 }
 
 function renderPrimaryState() {
   const primary = getPrimaryProvider();
-  const label = primary ? `${agentName(primary)} · ${primary.model}` : "未连接";
+  const mode = normalizeRunMode(preferences.runMode);
   $("primaryModelBadge").textContent = primary ? agentName(primary) : "未连接";
-  $("connectionSummary").textContent = primary ? `总控：${label}` : "等待添加模型";
-  $("chatStatus").textContent = primary ? `${agentName(primary)} 将作为当前总控` : "请先在设置中添加模型";
+  $("connectionSummary").textContent = primary ? `总控：${agentName(primary)} · ${modeLabel(mode)}` : "等待添加模型";
+  if (!activeRunContext || activeRunContext.conversationId !== activeConversationId) {
+    $("chatStatus").textContent = primary ? `${agentName(primary)} · ${modeLabel(mode)}` : "请先在设置中添加模型";
+  }
   const subtitle = $("welcomeSubtitle");
-  if (subtitle) subtitle.textContent = primary ? `${agentName(primary)} 负责最终回答，碰撞模式会在右侧显示每轮发言。` : "添加 DeepSeek、智谱 GLM 或其他模型后即可开始。";
+  if (subtitle) subtitle.textContent = primary ? `${agentName(primary)} 负责最终回答；当前模式：${modeLabel(mode)}。` : "添加模型后即可开始。";
 }
 
-function getPrimaryProvider() { return providers.find((provider) => provider.id === preferences?.primaryProviderId) || providers.find((provider) => provider.id === "deepseek") || providers[0] || null; }
-function normalizeProviders(items) { return items.map((provider) => { const defaults = PROVIDER_DEFAULTS[provider.id]; return defaults ? { ...defaults, ...provider } : { protocol: "openai-chat", ...provider }; }); }
-function getAgent(id, provider = null) { return { ...defaultAgentFor(provider || providers.find((item) => item.id === id) || { id, label: id }), ...(agentProfiles[id] || {}) }; }
-function agentName(provider) { return getAgent(provider.id, provider).displayName || provider.label; }
-function agentAvatar(id) { if (id === "input") return "你"; if (id === "error") return "!"; if (id === "system") return "SYS"; const agent = getAgent(id); return (agent.avatar || agent.displayName || id).slice(0, 4); }
-function defaultAgentFor(provider) { return DEFAULT_AGENT_PROFILES[provider.id] || { avatar: (provider.label || provider.id).slice(0, 2), displayName: provider.label || provider.id, role: "自定义 Agent", personality: "直接、清晰、给可执行建议。", systemPrompt: `你是 ${provider.label || provider.id}，请作为 Team Agent Marco 的一个 Agent 发言。` }; }
-function toggleCustomFields() { const visible = $("providerHint").value === "custom"; document.querySelectorAll(".custom-field").forEach((field) => field.classList.toggle("hidden", !visible)); }
-function toggleKeyVisibility() { const input = $("universalApiKey"); input.type = input.type === "password" ? "text" : "password"; $("toggleKeyButton").textContent = input.type === "password" ? "显示 Key" : "隐藏 Key"; }
+function renderRunEstimate() {
+  const mode = normalizeRunMode($("runMode")?.value || preferences.runMode);
+  const primary = getPrimaryProvider();
+  const participants = selectParticipants({ providers, primaryId: primary?.id, agentProfiles, maxAgents: $("maxDebateAgents")?.value || preferences.maxDebateAgents });
+  const calls = estimateCallCount({ mode, participantCount: participants.length, rounds: $("debateRounds")?.value || preferences.debateRounds });
+  const names = participants.map(agentName).join("、") || "暂无模型";
+  $("runEstimate").textContent = `预计 ${calls} 次模型调用；参与：${names}`;
+}
+
+function renderWorklog(run) {
+  clearProcess();
+  if (!run?.steps?.length) return;
+  run.steps.forEach(renderProcessStep);
+}
+
+function renderProcessStep(step) {
+  const list = $("processList");
+  list.querySelector(".process-empty")?.remove();
+  const node = document.createElement("article");
+  node.id = processNodeId(step.id);
+  node.className = `process-item ${step.state}`;
+  node.innerHTML = processStepHtml(step);
+  list.append(node);
+  list.scrollTop = list.scrollHeight;
+}
+
+function updateProcessNode(step) {
+  const node = $(processNodeId(step.id));
+  if (!node) return renderProcessStep(step);
+  node.className = `process-item ${step.state}`;
+  node.innerHTML = processStepHtml(step);
+  $("processList").scrollTop = $("processList").scrollHeight;
+}
+
+function processStepHtml(step) {
+  const meta = [step.elapsedMs ? `${(step.elapsedMs / 1000).toFixed(1)}s` : "", step.usage ? `${step.usage} tokens` : ""].filter(Boolean).join(" · ");
+  return `<div class="process-title"><span class="process-name"><span class="process-avatar">${escapeHtml(agentAvatar(step.providerId))}</span><span>${escapeHtml(step.title)}</span></span><em>${escapeHtml(stateLabel(step.state))}</em></div><pre>${escapeHtml(step.content)}</pre>${meta ? `<div class="process-meta">${escapeHtml(meta)}</div>` : ""}`;
+}
+
+function updateRunControls() {
+  const runningHere = Boolean(activeRunContext && activeRunContext.conversationId === activeConversationId && !activeRunContext.controller.signal.aborted);
+  $("stopButton").classList.toggle("hidden", !runningHere);
+  $("stopButton").disabled = !runningHere;
+  $("sendButton").disabled = sending;
+}
+
+async function openConversation(id) {
+  const conversation = activeRunContext?.conversationId === id
+    ? activeRunContext.conversation
+    : await getConversation(id);
+  if (!conversation) return;
+  activeConversationId = id;
+  $("conversationTitle").textContent = conversation.title;
+  $("messages").replaceChildren();
+  conversation.messages.forEach((message) => appendMessage(message));
+  renderWorklog(conversation.runs.at(-1));
+  showPage("chat");
+  updateRunControls();
+  await loadConversationList();
+}
+
+function newChat() {
+  activeConversationId = null;
+  $("conversationTitle").textContent = "新对话";
+  clearProcess();
+  const primary = getPrimaryProvider();
+  $("messages").innerHTML = `<div id="welcome" class="welcome"><div class="lab-stamp">MARCO / AGENT DESK</div><h2>直接说事。</h2><p id="welcomeSubtitle">${primary ? `${escapeHtml(agentName(primary))} 负责最终回答；当前模式：${escapeHtml(modeLabel(preferences.runMode))}。` : "添加模型后即可开始。"}</p><div class="suggestions"><button>让老D和智谱参谋碰撞后给结论</button><button>快速判断这个项目下一步</button><button>让参谋先审查，再由总控回答</button></div></div>`;
+  document.querySelectorAll(".suggestions button").forEach((button) => button.onclick = () => fillSuggestion(button.textContent));
+  renderPrimaryState();
+  showPage("chat");
+  updateRunControls();
+  loadConversationList();
+  resizeInput(true);
+}
 
 async function getOrCreateConversation(firstText) {
   if (activeConversationId) {
@@ -371,95 +495,38 @@ async function getOrCreateConversation(firstText) {
     if (existing) return existing;
   }
   const now = new Date().toISOString();
-  const conversation = { id: crypto.randomUUID(), title: firstText.replace(/\s+/g, " ").slice(0, 32), createdAt: now, updatedAt: now, messages: [] };
+  const conversation = { id: crypto.randomUUID(), title: firstText.replace(/\s+/g, " ").slice(0, 32), createdAt: now, updatedAt: now, messages: [], runs: [] };
   activeConversationId = conversation.id;
   return conversation;
 }
-function createMessage(role, content) { return { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString() }; }
+
 async function loadConversationList() {
   const items = await listConversations();
   const box = $("conversationList");
   box.innerHTML = items.length ? items.map((item) => `<button class="conversation-item${item.id === activeConversationId ? " active" : ""}" data-id="${item.id}">${escapeHtml(item.title || "新对话")}</button>`).join("") : `<small>还没有对话</small>`;
   box.querySelectorAll(".conversation-item").forEach((button) => button.onclick = () => openConversation(button.dataset.id));
 }
-async function openConversation(id) {
-  const conversation = await getConversation(id);
-  if (!conversation) return;
-  activeConversationId = id;
-  $("conversationTitle").textContent = conversation.title;
-  $("messages").replaceChildren();
-  clearProcess();
-  conversation.messages.forEach((message) => appendMessage(message));
-  showPage("chat");
-  await loadConversationList();
-}
-function newChat() {
-  activeConversationId = null;
-  $("conversationTitle").textContent = "新对话";
-  const primary = getPrimaryProvider();
-  clearProcess();
-  $("messages").innerHTML = `<div id="welcome" class="welcome"><div class="lab-stamp">MARCO / AGENT DESK</div><h2>直接说事。</h2><p id="welcomeSubtitle">${primary ? `${escapeHtml(agentName(primary))} 负责最终回答，碰撞模式会在右侧显示每轮发言。` : "添加模型后即可开始。"}</p><div class="suggestions"><button>让老D和智谱参谋进行两轮碰撞后给结论</button><button>把我的想法拆成产品计划和风险清单</button><button>让所有 Agent 先互相反驳再给我结果</button></div></div>`;
-  document.querySelectorAll(".suggestions button").forEach((button) => button.onclick = () => fillSuggestion(button.textContent));
-  renderPrimaryState();
-  showPage("chat");
-  loadConversationList();
-  resizeInput(true);
-}
-function appendMessage(message, consulted = [], usage = 0) {
+
+function appendMessage(message, consulted = [], usage = null) {
   const node = document.createElement("article");
   node.className = `message ${message.role}`;
-  const meta = message.role === "assistant" && (consulted.length || usage) ? `<div class="message-meta">${consulted.length ? `参考：${escapeHtml(consulted.join("、"))}` : ""}${consulted.length && usage ? " · " : ""}${usage ? `${usage} tokens` : ""}</div>` : "";
+  const runMeta = usage ? `${usage.calls || 0} 次调用 · ${usage.totalTokens || 0} tokens` : "";
+  const meta = message.role === "assistant" && (consulted.length || runMeta) ? `<div class="message-meta">${consulted.length ? `参考：${escapeHtml(consulted.join("、"))}` : ""}${consulted.length && runMeta ? " · " : ""}${escapeHtml(runMeta)}</div>` : "";
   node.innerHTML = `<div class="message-body"><div class="bubble">${escapeHtml(message.content)}</div>${meta}</div>`;
   $("messages").append(node);
   $("messages").scrollTop = $("messages").scrollHeight;
   return node;
 }
-function appendThinking(label) { return appendMessage(createMessage("assistant", `${label} 正在思考…`)); }
-function clearProcess() { processCounter = 0; $("processList").innerHTML = `<div class="process-empty">等待 Agent 发言。</div>`; }
-function addProcess(agentId, title, content, state = "pending") {
-  if (!preferences?.showProcess) return null;
-  const list = $("processList");
-  list.querySelector(".process-empty")?.remove();
-  const id = `process-${++processCounter}`;
-  const node = document.createElement("article");
-  node.id = id;
-  node.className = `process-item ${state}`;
-  node.innerHTML = `<div class="process-title"><span class="process-name"><span class="process-avatar">${escapeHtml(agentAvatar(agentId))}</span><span>${escapeHtml(title)}</span></span><em>${stateLabel(state)}</em></div><pre>${escapeHtml(content)}</pre>`;
-  list.append(node);
-  list.scrollTop = list.scrollHeight;
-  return id;
-}
-function updateProcess(id, content, state = "done") {
-  if (!id) return;
-  const node = $(id);
-  if (!node) return;
-  node.className = `process-item ${state}`;
-  node.querySelector("em").textContent = stateLabel(state);
-  node.querySelector("pre").textContent = content;
-  $("processList").scrollTop = $("processList").scrollHeight;
-}
-function stateLabel(state) { return state === "running" ? "进行中" : state === "error" ? "失败" : state === "done" ? "完成" : "等待"; }
-function setStatus(text) { $("chatStatus").textContent = text; }
-function showDetectMessage(text, error = false) { const box = $("detectMessage"); box.textContent = text; box.className = `inline-message${error ? " error" : ""}`; box.classList.remove("hidden"); }
-function resizeInput(force = false) {
-  const input = $("chatInput");
-  if (!input) return;
-  const minHeight = 96;
-  const maxHeight = 360;
-  const currentHeight = input.offsetHeight || minHeight;
-  if (!input.value || force) { input.style.height = `${minHeight}px`; return; }
-  const targetHeight = Math.max(minHeight, Math.min(input.scrollHeight, maxHeight));
-  if (currentHeight > targetHeight && currentHeight <= maxHeight) return;
-  input.style.height = `${targetHeight}px`;
-}
-function clampInteger(value, min, max, fallback) { const parsed = Number(value); return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback; }
-function readError(error) { return error?.message || String(error); }
-function toast(text, error = false) { const box = $("toast"); box.textContent = text; box.className = `toast${error ? " error" : ""}`; box.classList.remove("hidden"); setTimeout(() => box.classList.add("hidden"), 3200); }
 
 async function exportCurrentMarkdown() {
   const conversation = activeConversationId ? await getConversation(activeConversationId) : null;
-  if (!conversation?.messages?.length) { toast("当前对话还没有可导出的内容。", true); return; }
-  const lines = [`# ${conversation.title || "Team Agent Marco Conversation"}`, "", `- Created: ${conversation.createdAt}`, `- Updated: ${conversation.updatedAt}`, "", ...conversation.messages.flatMap((message) => [`## ${message.role === "user" ? "User" : "Agent"}`, "", message.content, ""])]
+  if (!conversation?.messages?.length) return toast("当前对话还没有可导出的内容。", true);
+  const lines = [`# ${conversation.title || "Team Agent Marco Conversation"}`, "", `- Created: ${conversation.createdAt}`, `- Updated: ${conversation.updatedAt}`, ""];
+  conversation.messages.forEach((message) => lines.push(`## ${message.role === "user" ? "User" : "Agent"}`, "", message.content, ""));
+  conversation.runs.forEach((run, index) => {
+    lines.push(`## WORKLOG ${index + 1}`, "", `- Mode: ${run.mode}`, `- Status: ${run.status}`, `- Calls: ${run.usage?.calls || 0}`, `- Tokens: ${run.usage?.totalTokens || 0}`, "");
+    run.steps.forEach((step) => lines.push(`### ${step.title}`, "", step.content, ""));
+  });
   const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -469,6 +536,39 @@ async function exportCurrentMarkdown() {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-  toast("已导出 Markdown");
+  toast("已导出完整对话和 WORKLOG");
 }
+
+function repairPrimaryProvider() {
+  if (providers.some((provider) => provider.id === preferences.primaryProviderId)) return;
+  preferences.primaryProviderId = providers.find((provider) => provider.id === "deepseek")?.id || providers[0]?.id || "deepseek";
+}
+function getPrimaryProvider() { return providers.find((provider) => provider.id === preferences.primaryProviderId) || providers[0] || null; }
+function normalizeProviders(items) { return items.map((provider) => PROVIDER_DEFAULTS[provider.id] ? { ...PROVIDER_DEFAULTS[provider.id], ...provider } : { protocol: "openai-chat", ...provider }); }
+function getAgent(id, provider = null) { return { ...defaultAgentFor(provider || providers.find((item) => item.id === id) || { id, label: id }), ...(agentProfiles[id] || {}) }; }
+function defaultAgentFor(provider) { return DEFAULT_AGENT_PROFILES[provider.id] || { avatar: (provider.label || provider.id).slice(0, 2), displayName: provider.label || provider.id, role: "自定义 Agent", personality: "直接、清晰、给可执行建议。", systemPrompt: `你是 ${provider.label || provider.id}，请作为 Team Agent Marco 的一个 Agent 发言。`, participatesInDebate: true }; }
+function agentName(provider) { return getAgent(provider.id, provider).displayName || provider.label; }
+function agentAvatar(id) { if (id === "input") return "你"; if (id === "error") return "!"; if (id === "system") return "SYS"; return (getAgent(id).avatar || getAgent(id).displayName || id).slice(0, 4); }
+function createMessage(role, content) { return { id: crypto.randomUUID(), role, content, createdAt: new Date().toISOString() }; }
+function appendThinking(label) { return appendMessage(createMessage("assistant", `${label} 正在思考…`)); }
+function clearProcess() { $("processList").innerHTML = `<div class="process-empty">等待 Agent 发言。</div>`; }
+function processNodeId(stepId) { return `process-${stepId}`; }
+function formatDebateNote(note) { return `Round ${note.round} · ${note.name}\n${note.text}`; }
+function modeLabel(mode) { return ({ quick: "快速模式", advisor: "参谋模式", debate: "深度碰撞" })[normalizeRunMode(mode)]; }
+function describeRunPlan(mode, participantCount) { return `${modeLabel(mode)}；${participantCount} 个 Agent；预计 ${estimateCallCount({ mode, participantCount, rounds: preferences.debateRounds })} 次模型调用。`; }
+function stateLabel(state) { return ({ running: "进行中", error: "失败", cancelled: "已停止", done: "完成", pending: "等待" })[state] || state; }
+function setStatus(text) { $("chatStatus").textContent = text; }
+function setStatusForConversation(id, text) { if (activeConversationId === id) setStatus(text); }
+function setStatusForCurrentRun(text) { if (activeRunContext) setStatusForConversation(activeRunContext.conversationId, text); }
+function showDetectMessage(text, error = false) { const box = $("detectMessage"); box.textContent = text; box.className = `inline-message${error ? " error" : ""}`; box.classList.remove("hidden"); }
+function toggleCustomFields() { const visible = $("providerHint").value === "custom"; document.querySelectorAll(".custom-field").forEach((field) => field.classList.toggle("hidden", !visible)); }
+function toggleKeyVisibility() { const input = $("universalApiKey"); input.type = input.type === "password" ? "text" : "password"; $("toggleKeyButton").textContent = input.type === "password" ? "显示 Key" : "隐藏 Key"; }
+function fillSuggestion(text) { $("chatInput").value = text; resizeInput(false); $("chatInput").focus(); }
+function resizeInput(force = false) { const input = $("chatInput"); if (!input) return; const minHeight = 96; const maxHeight = 360; if (!input.value || force) { input.style.height = `${minHeight}px`; return; } const currentHeight = input.offsetHeight || minHeight; const targetHeight = Math.max(minHeight, Math.min(input.scrollHeight, maxHeight)); if (currentHeight > targetHeight && currentHeight <= maxHeight) return; input.style.height = `${targetHeight}px`; }
+function clampInteger(value, min, max, fallback) { const parsed = Number(value); return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback; }
+function readError(error) { return error?.message || String(error); }
+function isAbortError(error) { return error?.name === "AbortError" || /停止|abort/i.test(readError(error)); }
+function assertNotAborted(signal) { if (signal.aborted) throw new DOMException("用户已停止生成。", "AbortError"); }
 function safeFileName(value) { return String(value).trim().replace(/[\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "team-agent-marco"; }
+function toast(text, error = false) { const box = $("toast"); box.textContent = text; box.className = `toast${error ? " error" : ""}`; box.classList.remove("hidden"); setTimeout(() => box.classList.add("hidden"), 3200); }
+function registerServiceWorker() { if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => undefined); }

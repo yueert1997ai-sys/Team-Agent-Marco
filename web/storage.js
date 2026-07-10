@@ -8,28 +8,32 @@ export const DEFAULT_AGENT_PROFILES = {
     displayName: "老D",
     role: "总控 / 产品反方",
     personality: "直接、务实、先找漏洞，再给能落地的方案。说话不要端着。",
-    systemPrompt: "你叫老D。你负责把问题拆清楚、挑出风险、给出下一步动作。不要空话，不要过度礼貌。"
+    systemPrompt: "你叫老D。你负责把问题拆清楚、挑出风险、给出下一步动作。不要空话，不要过度礼貌。",
+    participatesInDebate: true
   },
   zhipu: {
     avatar: "智",
     displayName: "智谱参谋",
     role: "中文策略 / 资料整理",
     personality: "稳、细、适合补充背景、梳理结构和中文表达。",
-    systemPrompt: "你是智谱参谋。你负责补全信息、整理结构、指出遗漏和给出可执行建议。"
+    systemPrompt: "你是智谱参谋。你负责补全信息、整理结构、指出遗漏和给出可执行建议。",
+    participatesInDebate: true
   },
   openai: {
     avatar: "G",
     displayName: "GPT 总控",
     role: "最终整合 / 高阶判断",
     personality: "清晰、克制、负责最后整合。",
-    systemPrompt: "你负责最终整合所有意见，给出清晰可执行的回答。"
+    systemPrompt: "你负责最终整合所有意见，给出清晰可执行的回答。",
+    participatesInDebate: true
   },
   gemini: {
     avatar: "GM",
     displayName: "Gemini",
     role: "技术 / 多模态 / 广角分析",
     personality: "视野宽，适合补充技术路线和替代方案。",
-    systemPrompt: "你负责从技术、信息完整度和替代方案角度补充意见。"
+    systemPrompt: "你负责从技术、信息完整度和替代方案角度补充意见。",
+    participatesInDebate: true
   }
 };
 
@@ -65,17 +69,20 @@ export function putRecord(name, value) { return requestToPromise(store(name, "re
 export function removeRecord(name, key) { return requestToPromise(store(name, "readwrite").delete(key)); }
 
 export async function loadPreferences() {
-  const defaults = {
+  const stored = (await getRecord("settings", "preferences")) || {};
+  const migratedMode = stored.runMode || (stored.consultExperts === false ? "quick" : stored.debateMode === false ? "advisor" : "debate");
+  return {
     id: "preferences",
     primaryProviderId: "deepseek",
-    consultExperts: true,
-    debateMode: true,
+    runMode: migratedMode,
     debateRounds: 2,
+    maxDebateAgents: 2,
     showProcess: true,
     maxOutputTokens: 4000,
-    timeoutMs: 120000
+    timeoutMs: 120000,
+    ...stored,
+    runMode: migratedMode
   };
-  return { ...defaults, ...((await getRecord("settings", "preferences")) || {}) };
 }
 
 export async function savePreferences(preferences) { await putRecord("settings", { id: "preferences", ...preferences }); }
@@ -83,9 +90,13 @@ export async function loadProviders() { return (await getRecord("settings", "pro
 export async function saveProviders(items) { await putRecord("settings", { id: "providers", items }); }
 export async function loadAgentProfiles() { return { ...DEFAULT_AGENT_PROFILES, ...((await getRecord("settings", "agents"))?.items || {}) }; }
 export async function saveAgentProfiles(items) { await putRecord("settings", { id: "agents", items }); }
-export async function saveConversation(conversation) { await putRecord("conversations", conversation); }
-export async function getConversation(id) { return getRecord("conversations", id); }
-export async function listConversations() { return (await getAllRecords("conversations")).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 80); }
+export async function saveConversation(conversation) { await putRecord("conversations", normalizeConversation(conversation)); }
+export async function getConversation(id) { const value = await getRecord("conversations", id); return value ? normalizeConversation(value) : value; }
+export async function listConversations() { return (await getAllRecords("conversations")).map(normalizeConversation).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 80); }
+
+function normalizeConversation(conversation) {
+  return { ...conversation, messages: conversation.messages || [], runs: conversation.runs || [] };
+}
 
 async function getVaultKey() {
   const stored = await getRecord("vault", "crypto-key");
