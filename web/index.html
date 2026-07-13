@@ -10,15 +10,20 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div class="app-shell">
+<button id="mobileMenuButton" class="mobile-menu-button" type="button" aria-label="打开导航">☰</button>
+<div id="appShell" class="app-shell">
   <aside class="sidebar">
     <div class="brand"><strong>MARCO LAB</strong><small>私人 AI 工作台</small></div>
     <button id="newChatButton" class="nav-primary">+ 新对话</button>
+    <button id="openProjectButton" class="nav-link">项目记忆</button>
     <button id="openSettingsButton" class="nav-link">模型接入</button>
     <button id="openAgentsButton" class="nav-link">Agent 定制</button>
     <div class="section-title">最近对话</div>
     <div id="conversationList" class="conversation-list"><small>还没有对话</small></div>
-    <div class="sidebar-footer"><small id="connectionSummary">等待添加模型</small></div>
+    <div class="sidebar-footer">
+      <small id="projectSummary">未设置项目记忆</small>
+      <small id="connectionSummary">等待添加模型</small>
+    </div>
   </aside>
 
   <main class="main-area">
@@ -26,38 +31,73 @@
       <header class="topbar">
         <div><h1 id="conversationTitle">新对话</h1><p id="chatStatus">等待任务</p></div>
         <div class="top-actions">
+          <button id="toggleWorklogButton" class="text-button" type="button">过程</button>
           <button id="stopButton" class="stop-button hidden" type="button">停止</button>
-          <button id="exportMarkdownButton" class="text-button" type="button">导出 Markdown</button>
+          <button id="exportMarkdownButton" class="text-button" type="button">导出</button>
           <span id="primaryModelBadge" class="model-badge">未连接</span>
         </div>
       </header>
+
       <div id="messages" class="messages">
         <div id="welcome" class="welcome">
           <div class="lab-stamp">MARCO / AGENT DESK</div>
-          <h2>直接说事。</h2>
+          <h2>说目标，系统自己组队。</h2>
           <p id="welcomeSubtitle">添加模型后即可开始。</p>
-          <div class="suggestions">
-            <button>让老D和智谱参谋碰撞后给结论</button>
-            <button>快速判断这个项目下一步</button>
-            <button>让参谋先审查，再由总控回答</button>
+          <div class="recipe-grid">
+            <button class="recipe-card" data-recipe="decision" data-prompt="帮我判断这件事该不该做，给明确结论和下一步。"><strong>做决策</strong><small>方案、取舍、优先级</small></button>
+            <button class="recipe-card" data-recipe="review" data-prompt="帮我审查这个方案，重点找漏洞、风险和遗漏。"><strong>审方案</strong><small>Review、挑错、补缺口</small></button>
+            <button class="recipe-card" data-recipe="plan" data-prompt="把这件事拆成可以直接执行的步骤和 To-do。"><strong>拆计划</strong><small>步骤、里程碑、Codex 任务</small></button>
+            <button class="recipe-card" data-recipe="creative" data-prompt="围绕这个方向发散几个够有差异的创意，再筛出最值得做的。"><strong>创意发散</strong><small>选题、剧情、产品点子</small></button>
           </div>
         </div>
       </div>
+
       <div class="composer-wrap">
+        <div class="composer-tools">
+          <label>任务
+            <select id="recipePicker">
+              <option value="auto">自动判断</option>
+              <option value="decision">做决策</option>
+              <option value="review">审方案</option>
+              <option value="plan">拆执行计划</option>
+              <option value="creative">创意发散</option>
+              <option value="general">普通问答</option>
+            </select>
+          </label>
+          <span id="routeHint">自动选择最合适的流程</span>
+        </div>
         <form id="chatForm" class="composer">
-          <textarea id="chatInput" rows="4" placeholder="输入你要处理的事…" autofocus></textarea>
+          <textarea id="chatInput" rows="4" placeholder="直接说你要解决什么…" autofocus></textarea>
           <button id="sendButton" type="submit" aria-label="发送">↵</button>
         </form>
         <small>Enter 发送，Shift + Enter 换行</small>
       </div>
     </section>
 
+    <section id="projectPage" class="page">
+      <header class="topbar"><div><h1>项目记忆</h1><p>把长期背景放这里，新对话会自动带上。</p></div><button class="text-button backToChatButton">返回</button></header>
+      <div class="settings-shell">
+        <section class="settings-section">
+          <h2>当前项目</h2>
+          <p>先保持一个主项目，减少每次重复解释背景。这里的内容会进入 Agent 提示词。</p>
+          <div class="project-form">
+            <label>项目名称<input id="projectName" placeholder="例如 Team Agent Marco"></label>
+            <label>项目目标<textarea id="projectGoal" rows="3" placeholder="这个项目最终要解决什么"></textarea></label>
+            <label>固定背景<textarea id="projectContext" rows="6" placeholder="产品定位、技术现状、用户背景、已完成内容"></textarea></label>
+            <label>硬约束<textarea id="projectConstraints" rows="4" placeholder="预算、技术限制、不能做的事"></textarea></label>
+            <label>已确认决定<textarea id="projectDecisions" rows="5" placeholder="已经拍板的结论，避免 Agent 反复推翻"></textarea></label>
+          </div>
+          <button id="saveProjectButton" class="primary-button" type="button">保存项目记忆</button>
+        </section>
+      </div>
+    </section>
+
     <section id="settingsPage" class="page">
-      <header class="topbar"><div><h1>模型接入</h1><p>添加 API、选择总控和运行模式。</p></div><button class="text-button backToChatButton">返回</button></header>
+      <header class="topbar"><div><h1>模型接入</h1><p>添加 API、选择总控和高级运行策略。</p></div><button class="text-button backToChatButton">返回</button></header>
       <div class="settings-shell">
         <section class="settings-section">
           <h2>添加 API</h2>
-          <p>为了保护 Key，DeepSeek、智谱等平台请先手动选择。系统不会再拿一个 Key 轮流试探多个平台。</p>
+          <p>DeepSeek、智谱等平台请先手动选择。系统不会拿一个 Key 轮流试探多个平台。</p>
           <div class="form-grid">
             <label class="wide">API Key<input id="universalApiKey" type="password" autocomplete="off" placeholder="粘贴 API Key"></label>
             <label>平台
@@ -82,38 +122,40 @@
         </section>
 
         <section class="settings-section">
-          <div class="section-head"><div><h2>已连接模型</h2><p>可以修改模型名或切换总控。</p></div><span id="storageBadge">本地设备</span></div>
+          <div class="section-head"><div><h2>已连接模型</h2><p>模型负责执行，Agent 负责角色和能力。</p></div><span id="storageBadge">本地设备</span></div>
           <div id="providerList" class="provider-list"></div>
         </section>
 
         <section class="settings-section">
-          <h2>运行模式</h2>
+          <h2>高级运行策略</h2>
+          <p>日常建议保持“自动模式”。只有明确需要时再强制快速或深度碰撞。</p>
           <div class="preference-list">
             <label>模式
               <select id="runMode">
+                <option value="auto">自动模式（推荐）</option>
                 <option value="quick">快速模式：总控直接回答</option>
-                <option value="advisor">参谋模式：辅助分析后总控回答</option>
-                <option value="debate">深度碰撞：初判、修正、最终整合</option>
+                <option value="advisor">参谋模式：审查后总控回答</option>
+                <option value="debate">深度碰撞：初判、修正、整合</option>
               </select>
             </label>
-            <label>碰撞轮数<select id="debateRounds"><option value="1">1 轮：独立初判</option><option value="2">2 轮：初判 + 反驳修正</option></select></label>
+            <label>碰撞轮数<select id="debateRounds"><option value="1">1 轮：独立初判</option><option value="2">2 轮：初判 + 修正</option></select></label>
             <label>最多参与 Agent 数<input id="maxDebateAgents" type="number" min="1" max="6" value="2"></label>
-            <label class="switch-row"><span><strong>显示过程面板</strong><small>保存并展示 Agent 工作发言</small></span><input id="showProcess" type="checkbox" checked></label>
+            <label class="switch-row"><span><strong>显示过程面板</strong><small>默认折叠过程，优先展示结果</small></span><input id="showProcess" type="checkbox" checked></label>
             <label>最终输出上限<input id="maxOutputTokens" type="number" min="100" max="128000" value="4000"></label>
             <label>单次请求超时（毫秒）<input id="timeoutMs" type="number" min="5000" max="600000" value="120000"></label>
           </div>
-          <div id="runEstimate" class="run-estimate">预计调用次数将在这里显示</div>
+          <div id="runEstimate" class="run-estimate">自动模式会按任务复杂度决定调用次数</div>
           <button id="savePreferencesButton" class="primary-button" type="button">保存</button>
         </section>
       </div>
     </section>
 
     <section id="agentsPage" class="page">
-      <header class="topbar"><div><h1>Agent 定制</h1><p>给已接入模型设置头像、角色和提示词。</p></div><button class="text-button backToChatButton">返回</button></header>
+      <header class="topbar"><div><h1>Agent 定制</h1><p>定义角色、能力和底层模型。</p></div><button class="text-button backToChatButton">返回</button></header>
       <div class="settings-shell">
         <section class="settings-section">
           <h2>你的 Agent 团队</h2>
-          <p>只有已接入 API 的模型会显示。可以关闭某个 Agent 的“参与多 Agent 任务”。</p>
+          <p>能力标签会影响自动路由。例：decision, review, planning, research, technical, creative, writing。</p>
           <div id="agentProfileList" class="agent-profile-list"></div>
           <button id="saveAgentsButton" class="primary-button" type="button">保存 Agent 配置</button>
         </section>
@@ -122,8 +164,12 @@
   </main>
 
   <aside id="processPanel" class="process-panel">
-    <div class="process-head"><strong>WORKLOG</strong><small id="processHint">过程会随会话保存</small></div>
-    <div id="processList" class="process-list"><div class="process-empty">等待任务。</div></div>
+    <div class="process-head">
+      <div><strong>WORKLOG</strong><small id="processHint">默认折叠，结果优先</small></div>
+      <button id="closeWorklogButton" class="text-button" type="button">收起</button>
+    </div>
+    <div id="processSummary" class="process-summary">等待任务。</div>
+    <div id="processList" class="process-list"><div class="process-empty">暂无过程。</div></div>
   </aside>
 </div>
 <div id="toast" class="toast hidden"></div>
