@@ -1,5 +1,6 @@
 const DB_NAME = "team-agent-marco-web";
 const DB_VERSION = 1;
+const EXPERIENCE_VERSION = 4;
 let database;
 
 export const DEFAULT_AGENT_PROFILES = {
@@ -74,9 +75,13 @@ export function removeRecord(name, key) { return requestToPromise(store(name, "r
 
 export async function loadPreferences() {
   const stored = (await getRecord("settings", "preferences")) || {};
-  const migratedMode = stored.runMode || (stored.consultExperts === false ? "quick" : stored.debateMode === false ? "advisor" : "auto");
+  const upgraded = Number(stored.experienceVersion || 0) < EXPERIENCE_VERSION;
+  const migratedMode = upgraded
+    ? "auto"
+    : stored.runMode || (stored.consultExperts === false ? "quick" : stored.debateMode === false ? "advisor" : "auto");
   return {
     id: "preferences",
+    experienceVersion: EXPERIENCE_VERSION,
     primaryProviderId: "deepseek",
     runMode: migratedMode,
     debateRounds: 2,
@@ -85,12 +90,17 @@ export async function loadPreferences() {
     maxOutputTokens: 4000,
     timeoutMs: 120000,
     ...stored,
+    experienceVersion: EXPERIENCE_VERSION,
     runMode: migratedMode
   };
 }
 
 export async function savePreferences(preferences) {
-  await putRecord("settings", { id: "preferences", ...preferences });
+  await putRecord("settings", {
+    id: "preferences",
+    experienceVersion: EXPERIENCE_VERSION,
+    ...preferences
+  });
 }
 
 export async function loadProviders() {
