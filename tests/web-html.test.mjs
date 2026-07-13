@@ -17,7 +17,7 @@ async function read(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
 }
 
-test("HTML exposes automatic recipes, project memory and result-first worklog", async () => {
+test("HTML exposes automatic recipes, project memory and workspace controls", async () => {
   const html = await read("web/index.html");
   for (const id of [
     "chatPage",
@@ -27,7 +27,11 @@ test("HTML exposes automatic recipes, project memory and result-first worklog", 
     "runMode",
     "toggleWorklogButton",
     "processSummary",
-    "agentProfileList"
+    "agentProfileList",
+    "conversationSearch",
+    "renameConversationButton",
+    "deleteConversationButton",
+    "conversationCount"
   ]) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
@@ -36,6 +40,8 @@ test("HTML exposes automatic recipes, project memory and result-first worklog", 
   assert.match(html, /审方案/);
   assert.match(html, /拆执行计划/);
   assert.match(html, /创意发散/);
+  assert.match(html, /ux\.css/);
+  assert.match(html, /ux\.js/);
 });
 
 test("automatic router selects recipes and avoids heavy mode for simple questions", () => {
@@ -131,6 +137,21 @@ test("app includes project memory, feedback, one-click actions and collapsed wor
   assert.match(css, /\.result-actions/);
 });
 
+test("workspace UX previews routing and closes the result-to-project loop", async () => {
+  const ux = await read("web/ux.js");
+  const uxCss = await read("web/ux.css");
+  assert.match(ux, /refreshRoutePreview/);
+  assert.match(ux, /estimateCallCount/);
+  assert.match(ux, /renameActiveConversation/);
+  assert.match(ux, /deleteActiveConversation/);
+  assert.match(ux, /saveMessageAsDecision/);
+  assert.match(ux, /decorateCodeBlocks/);
+  assert.match(ux, /removeRecord\("conversations"/);
+  assert.match(uxCss, /\.conversation-tools/);
+  assert.match(uxCss, /\.code-copy-button/);
+  assert.match(uxCss, /route-preview-ready/);
+});
+
 test("provider final prompt is structured and receives project memory", async () => {
   const source = await read("web/providers.js");
   assert.match(source, /formatProjectMemory/);
@@ -139,16 +160,19 @@ test("provider final prompt is structured and receives project memory", async ()
   assert.match(source, /项目记忆（视为长期有效背景）/);
 });
 
-test("service worker caches only successful responses", async () => {
+test("service worker caches only successful responses and all UX assets", async () => {
   const source = await read("web/sw.js");
   assert.match(source, /response\.ok/);
   assert.match(source, /orchestrator\.js/);
-  assert.match(source, /web-v9/);
+  assert.match(source, /ux\.js/);
+  assert.match(source, /ux\.css/);
+  assert.match(source, /web-v10/);
 });
 
 test("all web JavaScript files pass syntax checks", async () => {
   for (const path of [
     "web/app.js",
+    "web/ux.js",
     "web/providers.js",
     "web/storage.js",
     "web/orchestrator.js",
