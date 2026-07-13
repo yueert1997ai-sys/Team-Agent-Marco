@@ -1,18 +1,35 @@
-const CACHE = "team-agent-marco-web-v7";
-const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./storage.js", "./providers.js", "./orchestrator.js", "./manifest.webmanifest"];
+const CACHE = "team-agent-marco-web-v9";
+const ASSETS = [
+  "./",
+  "./index.html",
+  "./styles.css",
+  "./app.js",
+  "./storage.js",
+  "./providers.js",
+  "./orchestrator.js",
+  "./manifest.webmanifest"
+];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches.open(CACHE)
+      .then((cache) => cache.addAll(ASSETS))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim()));
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || !event.request.url.startsWith(self.location.origin)) return;
   event.respondWith(
-    fetch(event.request, { cache: "no-store" })
+    fetch(event.request)
       .then((response) => {
         if (response.ok) {
           const copy = response.clone();
@@ -20,11 +37,6 @@ self.addEventListener("fetch", (event) => {
         }
         return response;
       })
-      .catch(async () => {
-        const cached = await caches.match(event.request);
-        if (cached) return cached;
-        if (event.request.mode === "navigate") return caches.match("./index.html");
-        throw new Error("Offline and no cached response");
-      })
+      .catch(() => caches.match(event.request))
   );
 });
