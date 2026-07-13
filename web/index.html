@@ -8,6 +8,7 @@
   <title>Marco Lab</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="ux.css">
 </head>
 <body>
 <button id="mobileMenuButton" class="mobile-menu-button" type="button" aria-label="打开导航">☰</button>
@@ -18,7 +19,14 @@
     <button id="openProjectButton" class="nav-link">项目记忆</button>
     <button id="openSettingsButton" class="nav-link">模型接入</button>
     <button id="openAgentsButton" class="nav-link">Agent 定制</button>
-    <div class="section-title">最近对话</div>
+    <div class="section-title conversation-title-row"><span>最近对话</span><small id="conversationCount">0</small></div>
+    <div class="conversation-tools">
+      <input id="conversationSearch" type="search" placeholder="搜索对话" autocomplete="off" aria-label="搜索对话">
+      <div class="conversation-actions">
+        <button id="renameConversationButton" type="button">重命名</button>
+        <button id="deleteConversationButton" type="button" class="danger-text">删除</button>
+      </div>
+    </div>
     <div id="conversationList" class="conversation-list"><small>还没有对话</small></div>
     <div class="sidebar-footer">
       <small id="projectSummary">未设置项目记忆</small>
@@ -64,7 +72,7 @@
               <option value="general">普通问答</option>
             </select>
           </label>
-          <span id="routeHint">自动选择最合适的流程</span>
+          <span id="routeHint" aria-live="polite">自动选择最合适的流程</span>
         </div>
         <form id="chatForm" class="composer">
           <textarea id="chatInput" rows="4" placeholder="直接说你要解决什么…" autofocus></textarea>
@@ -174,5 +182,6 @@
 </div>
 <div id="toast" class="toast hidden"></div>
 <script src="app.js" type="module"></script>
+<script src="ux.js" type="module"></script>
 </body>
 </html>
