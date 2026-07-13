@@ -9,6 +9,7 @@ export const DEFAULT_AGENT_PROFILES = {
     role: "总控 / 产品反方",
     personality: "直接、务实、先找漏洞，再给能落地的方案。说话不要端着。",
     systemPrompt: "你叫老D。你负责把问题拆清楚、挑出风险、给出下一步动作。不要空话，不要过度礼貌。",
+    capabilities: ["decision", "review", "planning"],
     participatesInDebate: true
   },
   zhipu: {
@@ -17,6 +18,7 @@ export const DEFAULT_AGENT_PROFILES = {
     role: "中文策略 / 资料整理",
     personality: "稳、细、适合补充背景、梳理结构和中文表达。",
     systemPrompt: "你是智谱参谋。你负责补全信息、整理结构、指出遗漏和给出可执行建议。",
+    capabilities: ["review", "research", "planning", "writing"],
     participatesInDebate: true
   },
   openai: {
@@ -25,6 +27,7 @@ export const DEFAULT_AGENT_PROFILES = {
     role: "最终整合 / 高阶判断",
     personality: "清晰、克制、负责最后整合。",
     systemPrompt: "你负责最终整合所有意见，给出清晰可执行的回答。",
+    capabilities: ["decision", "review", "planning", "creative", "technical"],
     participatesInDebate: true
   },
   gemini: {
@@ -33,6 +36,7 @@ export const DEFAULT_AGENT_PROFILES = {
     role: "技术 / 多模态 / 广角分析",
     personality: "视野宽，适合补充技术路线和替代方案。",
     systemPrompt: "你负责从技术、信息完整度和替代方案角度补充意见。",
+    capabilities: ["technical", "research", "creative", "review"],
     participatesInDebate: true
   }
 };
@@ -70,7 +74,7 @@ export function removeRecord(name, key) { return requestToPromise(store(name, "r
 
 export async function loadPreferences() {
   const stored = (await getRecord("settings", "preferences")) || {};
-  const migratedMode = stored.runMode || (stored.consultExperts === false ? "quick" : stored.debateMode === false ? "advisor" : "debate");
+  const migratedMode = stored.runMode || (stored.consultExperts === false ? "quick" : stored.debateMode === false ? "advisor" : "auto");
   return {
     id: "preferences",
     primaryProviderId: "deepseek",
@@ -85,17 +89,93 @@ export async function loadPreferences() {
   };
 }
 
-export async function savePreferences(preferences) { await putRecord("settings", { id: "preferences", ...preferences }); }
-export async function loadProviders() { return (await getRecord("settings", "providers"))?.items || []; }
-export async function saveProviders(items) { await putRecord("settings", { id: "providers", items }); }
-export async function loadAgentProfiles() { return { ...DEFAULT_AGENT_PROFILES, ...((await getRecord("settings", "agents"))?.items || {}) }; }
-export async function saveAgentProfiles(items) { await putRecord("settings", { id: "agents", items }); }
-export async function saveConversation(conversation) { await putRecord("conversations", normalizeConversation(conversation)); }
-export async function getConversation(id) { const value = await getRecord("conversations", id); return value ? normalizeConversation(value) : value; }
-export async function listConversations() { return (await getAllRecords("conversations")).map(normalizeConversation).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 80); }
+export async function savePreferences(preferences) {
+  await putRecord("settings", { id: "preferences", ...preferences });
+}
+
+export async function loadProviders() {
+  return (await getRecord("settings", "providers"))?.items || [];
+}
+
+export async function saveProviders(items) {
+  await putRecord("settings", { id: "providers", items });
+}
+
+export async function loadAgentProfiles() {
+  const stored = (await getRecord("settings", "agents"))?.items || {};
+  const ids = new Set([...Object.keys(DEFAULT_AGENT_PROFILES), ...Object.keys(stored)]);
+  return Object.fromEntries(Array.from(ids).map((id) => [
+    id,
+    {
+      ...(DEFAULT_AGENT_PROFILES[id] || {}),
+      ...(stored[id] || {}),
+      capabilities: normalizeCapabilities(stored[id]?.capabilities ?? DEFAULT_AGENT_PROFILES[id]?.capabilities)
+    }
+  ]));
+}
+
+export async function saveAgentProfiles(items) {
+  await putRecord("settings", { id: "agents", items });
+}
+
+export async function loadProjectMemory() {
+  const stored = (await getRecord("settings", "project-memory")) || {};
+  return {
+    id: "project-memory",
+    name: "",
+    goal: "",
+    context: "",
+    constraints: "",
+    decisions: "",
+    updatedAt: null,
+    ...stored
+  };
+}
+
+export async function saveProjectMemory(memory) {
+  await putRecord("settings", {
+    id: "project-memory",
+    ...memory,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+export async function saveConversation(conversation) {
+  await putRecord("conversations", normalizeConversation(conversation));
+}
+
+export async function getConversation(id) {
+  const value = await getRecord("conversations", id);
+  return value ? normalizeConversation(value) : value;
+}
+
+export async function listConversations() {
+  return (await getAllRecords("conversations"))
+    .map(normalizeConversation)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 80);
+}
 
 function normalizeConversation(conversation) {
-  return { ...conversation, messages: conversation.messages || [], runs: conversation.runs || [] };
+  return {
+    ...conversation,
+    messages: conversation.messages || [],
+    runs: (conversation.runs || []).map((run) => ({
+      feedback: null,
+      recipe: "general",
+      routeReason: "",
+      ...run,
+      steps: run.steps || []
+    }))
+  };
+}
+
+function normalizeCapabilities(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+  return String(value || "")
+    .split(/[,，\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 async function getVaultKey() {
@@ -116,7 +196,11 @@ export async function saveProviderSecret(providerId, secret, remember) {
   const key = await getVaultKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(secret));
-  await putRecord("vault", { id: `secret:${providerId}`, iv: bytesToBase64(iv), ciphertext: bytesToBase64(new Uint8Array(ciphertext)) });
+  await putRecord("vault", {
+    id: `secret:${providerId}`,
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+  });
 }
 
 export async function readProviderSecret(providerId, providerLabel = providerId) {
@@ -125,7 +209,11 @@ export async function readProviderSecret(providerId, providerLabel = providerId)
   const record = await getRecord("vault", `secret:${providerId}`);
   if (!record) throw new Error(`${providerLabel} Key 不存在，请重新添加。`);
   const key = await getVaultKey();
-  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64ToBytes(record.iv) }, key, base64ToBytes(record.ciphertext));
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(record.iv) },
+    key,
+    base64ToBytes(record.ciphertext)
+  );
   return new TextDecoder().decode(plaintext);
 }
 
