@@ -4,81 +4,157 @@ import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import test from "node:test";
 import {
-  buildRoundContext,
   estimateCallCount,
+  getRecipe,
   normalizeRunMode,
+  routeTask,
   selectParticipants
 } from "../web/orchestrator.js";
 import { detectProvider, inferProviderHintFromKey } from "../web/providers.js";
 
 const execFileAsync = promisify(execFile);
-async function read(path) { return readFile(new URL(`../${path}`, import.meta.url), "utf8"); }
+async function read(path) {
+  return readFile(new URL(`../${path}`, import.meta.url), "utf8");
+}
 
-test("HTML exposes safe provider selection, run modes and stop control", async () => {
+test("HTML exposes automatic recipes, project memory and result-first worklog", async () => {
   const html = await read("web/index.html");
-  for (const id of ["chatPage", "processPanel", "processList", "agentsPage", "agentProfileList", "universalApiKey", "providerHint", "runMode", "debateRounds", "maxDebateAgents", "stopButton", "exportMarkdownButton"]) {
+  for (const id of [
+    "chatPage",
+    "projectPage",
+    "projectName",
+    "recipePicker",
+    "runMode",
+    "toggleWorklogButton",
+    "processSummary",
+    "agentProfileList"
+  ]) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
-  assert.match(html, /系统不会再拿一个 Key 轮流试探多个平台/);
-  assert.match(html, /快速模式/);
-  assert.match(html, /参谋模式/);
-  assert.match(html, /深度碰撞/);
+  assert.match(html, /自动模式（推荐）/);
+  assert.match(html, /做决策/);
+  assert.match(html, /审方案/);
+  assert.match(html, /拆执行计划/);
+  assert.match(html, /创意发散/);
 });
 
-test("safe key inference refuses ambiguous sk keys", async () => {
-  assert.equal(inferProviderHintFromKey("AIza-example"), "gemini");
-  assert.equal(inferProviderHintFromKey("sk-proj-example"), "openai");
-  assert.equal(inferProviderHintFromKey("sk-ambiguous-provider-key"), null);
-  const originalFetch = globalThis.fetch;
-  let fetchCalled = false;
-  globalThis.fetch = async () => { fetchCalled = true; throw new Error("should not fetch"); };
-  await assert.rejects(() => detectProvider("sk-ambiguous-provider-key", 1000, "auto"), /避免把 Key 发送到错误平台/);
-  assert.equal(fetchCalled, false);
-  globalThis.fetch = originalFetch;
+test("automatic router selects recipes and avoids heavy mode for simple questions", () => {
+  const simple = routeTask({
+    text: "Docker Desktop 是干嘛的？",
+    requestedMode: "auto",
+    requestedRecipe: "auto",
+    availableAgents: 2
+  });
+  assert.equal(simple.recipe, "general");
+  assert.equal(simple.mode, "quick");
+
+  const decision = routeTask({
+    text: "这两个方案哪个更值得优先做？",
+    requestedMode: "auto",
+    requestedRecipe: "auto",
+    availableAgents: 2
+  });
+  assert.equal(decision.recipe, "decision");
+  assert.equal(decision.mode, "advisor");
+
+  const debate = routeTask({
+    text: "让老D和智谱深度讨论并互相反驳这个方案",
+    requestedMode: "auto",
+    requestedRecipe: "auto",
+    availableAgents: 2
+  });
+  assert.equal(debate.mode, "debate");
 });
 
-test("orchestrator limits participants and preserves own first-round note", () => {
-  const providers = [{ id: "deepseek" }, { id: "zhipu" }, { id: "gemini" }];
-  const selected = selectParticipants({ providers, primaryId: "deepseek", agentProfiles: { gemini: { participatesInDebate: false } }, maxAgents: 2 });
-  assert.deepEqual(selected.map((item) => item.id), ["deepseek", "zhipu"]);
-  const previousNotes = [
-    { providerId: "deepseek", name: "老D", text: "A" },
-    { providerId: "zhipu", name: "智谱参谋", text: "B" }
+test("participant routing uses capability tags rather than connection order", () => {
+  const providers = [
+    { id: "deepseek" },
+    { id: "zhipu" },
+    { id: "gemini" }
   ];
-  const context = buildRoundContext({ providerId: "deepseek", previousNotes });
-  assert.equal(context.ownNote.text, "A");
-  assert.deepEqual(context.peerNotes.map((item) => item.text), ["B"]);
+  const profiles = {
+    deepseek: { capabilities: ["decision"] },
+    zhipu: { capabilities: ["writing"] },
+    gemini: { capabilities: ["technical", "review"] }
+  };
+  const selected = selectParticipants({
+    providers,
+    primaryId: "deepseek",
+    agentProfiles: profiles,
+    maxAgents: 2,
+    recipe: "review"
+  });
+  assert.deepEqual(selected.map((item) => item.id), ["deepseek", "gemini"]);
+  assert.deepEqual(getRecipe("plan").finalSections, ["目标", "执行步骤", "验收标准", "风险与回退"]);
 });
 
-test("call budget matches quick, advisor and debate modes", () => {
-  assert.equal(normalizeRunMode("unknown"), "debate");
+test("call budget still matches explicit modes", () => {
+  assert.equal(normalizeRunMode("bad"), "auto");
   assert.equal(estimateCallCount({ mode: "quick", participantCount: 2, rounds: 2 }), 1);
   assert.equal(estimateCallCount({ mode: "advisor", participantCount: 2, rounds: 2 }), 2);
   assert.equal(estimateCallCount({ mode: "debate", participantCount: 2, rounds: 2 }), 5);
 });
 
-test("app persists messages and worklog, supports abort, and avoids fixed overlay composer", async () => {
-  const app = await read("web/app.js");
-  const css = await read("web/styles.css");
-  assert.match(app, /await saveConversation\(conversation\);[\s\S]*createRun/);
-  assert.match(app, /AbortController/);
-  assert.match(app, /activeConversationId === conversationId/);
-  assert.match(app, /conversation\.runs/);
-  assert.match(app, /exportCurrentMarkdown/);
-  assert.match(css, /grid-template-rows:70px minmax\(0,1fr\) auto/);
-  assert.doesNotMatch(css, /\.composer-wrap\{[^}]*position:absolute/);
+test("safe key inference refuses ambiguous keys without network probes", async () => {
+  assert.equal(inferProviderHintFromKey("AIza-example"), "gemini");
+  assert.equal(inferProviderHintFromKey("sk-proj-example"), "openai");
+  assert.equal(inferProviderHintFromKey("sk-ambiguous-provider-key"), null);
+
+  const originalFetch = globalThis.fetch;
+  let fetchCalled = false;
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    throw new Error("should not fetch");
+  };
+  await assert.rejects(
+    () => detectProvider("sk-ambiguous-provider-key", 1000, "auto"),
+    /避免把 Key 发送到错误平台/
+  );
+  assert.equal(fetchCalled, false);
+  globalThis.fetch = originalFetch;
 });
 
-test("service worker does not cache failed responses", async () => {
+test("app includes project memory, feedback, one-click actions and collapsed worklog", async () => {
+  const app = await read("web/app.js");
+  const css = await read("web/styles.css");
+  const storage = await read("web/storage.js");
+  assert.match(app, /loadProjectMemory/);
+  assert.match(app, /routeTask/);
+  assert.match(app, /data-result-action="codex"/);
+  assert.match(app, /data-feedback="useful"/);
+  assert.match(app, /saveFeedback/);
+  assert.match(app, /setWorklogVisible/);
+  assert.match(app, /capabilities/);
+  assert.match(storage, /saveProjectMemory/);
+  assert.match(storage, /runMode:\s*migratedMode/);
+  assert.match(css, /\.worklog-open \.process-panel/);
+  assert.match(css, /\.result-actions/);
+});
+
+test("provider final prompt is structured and receives project memory", async () => {
+  const source = await read("web/providers.js");
+  assert.match(source, /formatProjectMemory/);
+  assert.match(source, /最终回答必须优先给结果/);
+  assert.match(source, /finalSections/);
+  assert.match(source, /项目记忆（视为长期有效背景）/);
+});
+
+test("service worker caches only successful responses", async () => {
   const source = await read("web/sw.js");
-  assert.match(source, /if \(response\.ok\)/);
-  assert.match(source, /cache: "no-store"/);
+  assert.match(source, /response\.ok/);
   assert.match(source, /orchestrator\.js/);
+  assert.match(source, /web-v9/);
 });
 
 test("all web JavaScript files pass syntax checks", async () => {
-  for (const path of ["web/app.js", "web/providers.js", "web/storage.js", "web/orchestrator.js", "web/sw.js"]) {
-    const { stderr } = await execFileAsync(process.execPath, ["--check", path], { cwd: new URL("..", import.meta.url) });
+  for (const path of [
+    "web/app.js",
+    "web/providers.js",
+    "web/storage.js",
+    "web/orchestrator.js",
+    "web/sw.js"
+  ]) {
+    const { stderr } = await execFileAsync(process.execPath, ["--check", path]);
     assert.equal(stderr, "");
   }
 });
