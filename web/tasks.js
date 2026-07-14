@@ -5,6 +5,7 @@ import {
 } from "./storage.js";
 
 const RECORD_ID = "task-desk";
+const ACTIVE_TASK_KEY = "marco-active-task";
 let tasks = [];
 let activeFilter = "open";
 let taskObserverTimer = null;
@@ -131,7 +132,11 @@ async function executeTask(taskId, recipe) {
   await persistTasks();
   renderTasks();
 
-  sessionStorage.setItem("marco-active-task", task.id);
+  writeActiveTaskMarker({
+    id: task.id,
+    baselineResults: document.querySelectorAll(".message.assistant .result-actions").length,
+    startedAt: task.lastRunAt
+  });
   closeTaskDesk();
   document.querySelector(".backToChatButton")?.click();
 
@@ -151,6 +156,7 @@ async function toggleTask(taskId) {
   task.status = done ? "inbox" : "done";
   task.completedAt = done ? null : new Date().toISOString();
   task.updatedAt = new Date().toISOString();
+  if (readActiveTaskMarker()?.id === taskId) clearActiveTaskMarker();
   await persistTasks();
   renderTasks();
 }
@@ -160,7 +166,7 @@ async function deleteTask(taskId) {
   if (!task) return;
   if (!window.confirm(`删除任务“${task.title.slice(0, 50)}”？`)) return;
   tasks = tasks.filter((item) => item.id !== taskId);
-  if (sessionStorage.getItem("marco-active-task") === taskId) sessionStorage.removeItem("marco-active-task");
+  if (readActiveTaskMarker()?.id === taskId) clearActiveTaskMarker();
   await persistTasks();
   renderTasks();
 }
@@ -260,41 +266,67 @@ function extractNextSteps(content) {
 }
 
 async function completeActiveTaskFromResult() {
-  const taskId = sessionStorage.getItem("marco-active-task");
-  if (!taskId) return;
-  const hasFinalResult = Array.from(document.querySelectorAll(".message.assistant .result-actions"))
-    .some((node) => node.isConnected);
-  if (!hasFinalResult) return;
+  const marker = readActiveTaskMarker();
+  if (!marker) return;
+  if (!document.getElementById("stopButton")?.classList.contains("hidden")) return;
 
-  const task = tasks.find((item) => item.id === taskId);
+  const statusText = document.getElementById("chatStatus")?.textContent || "";
+  if (/(发送失败|已停止)/.test(statusText)) {
+    await reopenActiveTask(marker.id);
+    return;
+  }
+
+  const resultCount = document.querySelectorAll(".message.assistant .result-actions").length;
+  if (resultCount <= Number(marker.baselineResults || 0)) return;
+
+  const task = tasks.find((item) => item.id === marker.id);
   if (!task || task.status !== "running") {
-    sessionStorage.removeItem("marco-active-task");
+    clearActiveTaskMarker();
     return;
   }
   task.status = "done";
   task.completedAt = new Date().toISOString();
   task.updatedAt = task.completedAt;
-  sessionStorage.removeItem("marco-active-task");
+  clearActiveTaskMarker();
   await persistTasks();
   renderTasks();
   showToast("任务已完成并归档");
 }
 
-async function restoreInterruptedTask() {
-  const taskId = sessionStorage.getItem("marco-active-task");
-  if (!taskId) return;
+async function reopenActiveTask(taskId) {
   const task = tasks.find((item) => item.id === taskId);
-  if (!task) {
-    sessionStorage.removeItem("marco-active-task");
-    return;
-  }
-  if (task.status === "running") {
+  if (task?.status === "running") {
     task.status = "inbox";
     task.updatedAt = new Date().toISOString();
     await persistTasks();
     renderTasks();
   }
-  sessionStorage.removeItem("marco-active-task");
+  clearActiveTaskMarker();
+}
+
+async function restoreInterruptedTask() {
+  const marker = readActiveTaskMarker();
+  if (!marker) return;
+  await reopenActiveTask(marker.id);
+}
+
+function writeActiveTaskMarker(marker) {
+  sessionStorage.setItem(ACTIVE_TASK_KEY, JSON.stringify(marker));
+}
+
+function readActiveTaskMarker() {
+  const raw = sessionStorage.getItem(ACTIVE_TASK_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return { id: raw, baselineResults: 0 };
+  }
+}
+
+function clearActiveTaskMarker() {
+  sessionStorage.removeItem(ACTIVE_TASK_KEY);
 }
 
 async function loadTasks() {
