@@ -89,7 +89,7 @@ export function routeTask({ text, requestedMode = "auto", requestedRecipe = "aut
     if (/(分工|分配|分别负责|各自负责|拆给|交给.*agent|并行处理|谁来做|安排给)/i.test(source)) {
       recipe = "delegate";
       reason = "检测到分工、并行或角色安排诉求";
-    } else if (/(帮我|替我|给我)(写|改|整理|提取|翻译|总结|列|生成|起草)|小事直办|顺手处理/i.test(source) && source.length < 220) {
+    } else if (/(帮我|替我|给我)(?:把|将)?(写|改|整理|提取|翻译|总结|列|生成|起草)|小事直办|顺手处理/i.test(source) && source.length < 220) {
       recipe = "task";
       reason = "检测到可以直接完成的轻量任务";
     } else if (/(计划|步骤|todo|to-do|拆解|执行|里程碑|codex|怎么做|如何做|实现|开发|搭建|写代码|改代码)/i.test(source)) {
