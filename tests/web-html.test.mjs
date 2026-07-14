@@ -17,7 +17,7 @@ async function read(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
 }
 
-test("HTML exposes automatic recipes, project memory and workspace controls", async () => {
+test("HTML exposes task desk, automatic recipes and workspace controls", async () => {
   const html = await read("web/index.html");
   for (const id of [
     "chatPage",
@@ -31,20 +31,27 @@ test("HTML exposes automatic recipes, project memory and workspace controls", as
     "conversationSearch",
     "renameConversationButton",
     "deleteConversationButton",
-    "conversationCount"
+    "conversationCount",
+    "openTasksButton",
+    "taskDesk",
+    "taskInput",
+    "taskList",
+    "runTaskButton",
+    "delegateTaskButton"
   ]) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
-  assert.match(html, /自动模式（推荐）/);
+  assert.match(html, /小事直办/);
+  assert.match(html, /智能分工/);
   assert.match(html, /做决策/);
   assert.match(html, /审方案/);
   assert.match(html, /拆执行计划/);
   assert.match(html, /创意发散/);
-  assert.match(html, /ux\.css/);
-  assert.match(html, /ux\.js/);
+  assert.match(html, /tasks\.css/);
+  assert.match(html, /tasks\.js/);
 });
 
-test("automatic router selects recipes and avoids heavy mode for simple questions", () => {
+test("automatic router distinguishes quick tasks, delegation and debates", () => {
   const simple = routeTask({
     text: "Docker Desktop 是干嘛的？",
     requestedMode: "auto",
@@ -53,6 +60,24 @@ test("automatic router selects recipes and avoids heavy mode for simple question
   });
   assert.equal(simple.recipe, "general");
   assert.equal(simple.mode, "quick");
+
+  const quickTask = routeTask({
+    text: "帮我把这段话整理成三条要点",
+    requestedMode: "auto",
+    requestedRecipe: "auto",
+    availableAgents: 2
+  });
+  assert.equal(quickTask.recipe, "task");
+  assert.equal(quickTask.mode, "quick");
+
+  const delegate = routeTask({
+    text: "把这个项目分工给老D和智谱并行处理",
+    requestedMode: "auto",
+    requestedRecipe: "auto",
+    availableAgents: 2
+  });
+  assert.equal(delegate.recipe, "delegate");
+  assert.equal(delegate.mode, "advisor");
 
   const decision = routeTask({
     text: "这两个方案哪个更值得优先做？",
@@ -70,6 +95,12 @@ test("automatic router selects recipes and avoids heavy mode for simple question
     availableAgents: 2
   });
   assert.equal(debate.mode, "debate");
+});
+
+test("task and delegation recipes have purpose-built outputs", () => {
+  assert.deepEqual(getRecipe("task").finalSections, ["完成结果", "必要说明"]);
+  assert.deepEqual(getRecipe("delegate").finalSections, ["任务目标", "分工与交付", "依赖和交接", "下一步行动"]);
+  assert.match(getRecipe("delegate").round1Prompt, /领取一个明确子任务/);
 });
 
 test("participant routing uses capability tags rather than connection order", () => {
@@ -152,6 +183,21 @@ test("workspace UX previews routing and closes the result-to-project loop", asyn
   assert.match(uxCss, /route-preview-ready/);
 });
 
+test("task desk persists work, launches recipes and extracts next steps", async () => {
+  const tasks = await read("web/tasks.js");
+  const css = await read("web/tasks.css");
+  assert.match(tasks, /RECORD_ID = "task-desk"/);
+  assert.match(tasks, /executeTask/);
+  assert.match(tasks, /preferredRecipe/);
+  assert.match(tasks, /marco-active-task/);
+  assert.match(tasks, /extractNextSteps/);
+  assert.match(tasks, /data-task-result-action="extract"/);
+  assert.match(tasks, /putRecord\("settings"/);
+  assert.match(css, /\.task-desk/);
+  assert.match(css, /\.task-item\.running/);
+  assert.match(css, /recipe-grid-six/);
+});
+
 test("provider final prompt is structured and receives project memory", async () => {
   const source = await read("web/providers.js");
   assert.match(source, /formatProjectMemory/);
@@ -160,19 +206,21 @@ test("provider final prompt is structured and receives project memory", async ()
   assert.match(source, /项目记忆（视为长期有效背景）/);
 });
 
-test("service worker caches only successful responses and all UX assets", async () => {
+test("service worker caches only successful responses and all task assets", async () => {
   const source = await read("web/sw.js");
   assert.match(source, /response\.ok/);
   assert.match(source, /orchestrator\.js/);
   assert.match(source, /ux\.js/);
-  assert.match(source, /ux\.css/);
-  assert.match(source, /web-v10/);
+  assert.match(source, /tasks\.js/);
+  assert.match(source, /tasks\.css/);
+  assert.match(source, /web-v11/);
 });
 
 test("all web JavaScript files pass syntax checks", async () => {
   for (const path of [
     "web/app.js",
     "web/ux.js",
+    "web/tasks.js",
     "web/providers.js",
     "web/storage.js",
     "web/orchestrator.js",
