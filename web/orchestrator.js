@@ -17,6 +17,22 @@ export const RECIPES = {
     round2Prompt: "检查回答是否遗漏关键条件，并给出必要修正。",
     finalSections: ["结论", "关键说明", "下一步"]
   },
+  task: {
+    id: "task",
+    label: "小事直办",
+    capabilities: ["writing", "planning"],
+    round1Prompt: "直接完成用户交代的小任务。只保留必要说明，不展开无关分析。",
+    round2Prompt: "检查结果是否可直接使用，修正格式、遗漏和明显错误。",
+    finalSections: ["完成结果", "必要说明"]
+  },
+  delegate: {
+    id: "delegate",
+    label: "智能分工",
+    capabilities: ["planning", "review", "research", "technical", "creative", "writing", "decision"],
+    round1Prompt: "根据你的角色和能力领取一个明确子任务，输出独立可交付结果。避免泛泛讨论，也不要重复其他角色可能负责的内容。",
+    round2Prompt: "检查各子任务之间的依赖、重复和缺口，补齐交接信息并修正自己的交付物。",
+    finalSections: ["任务目标", "分工与交付", "依赖和交接", "下一步行动"]
+  },
   decision: {
     id: "decision",
     label: "做决策",
@@ -70,7 +86,13 @@ export function routeTask({ text, requestedMode = "auto", requestedRecipe = "aut
   let reason = "用户手动选择任务类型";
 
   if (recipe === "auto") {
-    if (/(计划|步骤|todo|to-do|拆解|执行|里程碑|codex|怎么做|如何做|实现|开发|搭建|写代码|改代码)/i.test(source)) {
+    if (/(分工|分配|分别负责|各自负责|拆给|交给.*agent|并行处理|谁来做|安排给)/i.test(source)) {
+      recipe = "delegate";
+      reason = "检测到分工、并行或角色安排诉求";
+    } else if (/(帮我|替我|给我)(写|改|整理|提取|翻译|总结|列|生成|起草)|小事直办|顺手处理/i.test(source) && source.length < 220) {
+      recipe = "task";
+      reason = "检测到可以直接完成的轻量任务";
+    } else if (/(计划|步骤|todo|to-do|拆解|执行|里程碑|codex|怎么做|如何做|实现|开发|搭建|写代码|改代码)/i.test(source)) {
       recipe = "plan";
       reason = "检测到执行、拆解或实现诉求";
     } else if (/(review|审查|检查|漏洞|优化|风险|bug|报错|错误|哪里有问题|有什么问题|代码审查|架构审查)/i.test(source)) {
@@ -92,13 +114,22 @@ export function routeTask({ text, requestedMode = "auto", requestedRecipe = "aut
   if (mode === "auto") {
     const explicitDebate = /(碰撞|讨论|反驳|辩论|多轮|深度|全面|榨干|不同观点)/i.test(source);
     const shortSimple = source.length < 80 && recipe === "general";
-    if (availableAgents < 2 || shortSimple) {
+    if (availableAgents < 2) {
       mode = "quick";
-      reason += availableAgents < 2 ? "；只有一个可用 Agent" : "；问题较短且直接";
+      reason += "；只有一个可用 Agent";
+    } else if (recipe === "task") {
+      mode = "quick";
+      reason += "；轻量任务优先直接完成";
+    } else if (recipe === "delegate") {
+      mode = "advisor";
+      reason += "；由多个 Agent 并行领取子任务";
+    } else if (shortSimple) {
+      mode = "quick";
+      reason += "；问题较短且直接";
     } else if (explicitDebate) {
       mode = "debate";
       reason += "；用户明确要求多观点碰撞";
-    } else if (recipe === "decision" || recipe === "review" || recipe === "plan" || recipe === "creative") {
+    } else if (["decision", "review", "plan", "creative"].includes(recipe)) {
       mode = "advisor";
       reason += "；需要一次独立审查";
     } else {
