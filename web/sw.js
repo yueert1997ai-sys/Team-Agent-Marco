@@ -1,11 +1,13 @@
-const CACHE = "team-agent-marco-web-v10";
+const CACHE = "team-agent-marco-web-v11";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./ux.css",
+  "./tasks.css",
   "./app.js",
   "./ux.js",
+  "./tasks.js",
   "./storage.js",
   "./providers.js",
   "./orchestrator.js",
