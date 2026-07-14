@@ -9,6 +9,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="ux.css">
+  <link rel="stylesheet" href="tasks.css">
 </head>
 <body>
 <button id="mobileMenuButton" class="mobile-menu-button" type="button" aria-label="打开导航">☰</button>
@@ -16,6 +17,7 @@
   <aside class="sidebar">
     <div class="brand"><strong>MARCO LAB</strong><small>私人 AI 工作台</small></div>
     <button id="newChatButton" class="nav-primary">+ 新对话</button>
+    <button id="openTasksButton" class="nav-link task-nav-button"><span>任务台</span><small id="taskInboxCount">0</small></button>
     <button id="openProjectButton" class="nav-link">项目记忆</button>
     <button id="openSettingsButton" class="nav-link">模型接入</button>
     <button id="openAgentsButton" class="nav-link">Agent 定制</button>
@@ -49,9 +51,11 @@
       <div id="messages" class="messages">
         <div id="welcome" class="welcome">
           <div class="lab-stamp">MARCO / AGENT DESK</div>
-          <h2>说目标，系统自己组队。</h2>
+          <h2>小事直办，大事分工。</h2>
           <p id="welcomeSubtitle">添加模型后即可开始。</p>
-          <div class="recipe-grid">
+          <div class="recipe-grid recipe-grid-six">
+            <button class="recipe-card" data-recipe="task" data-prompt="直接帮我完成这件小事，给可直接使用的结果："><strong>小事直办</strong><small>写、改、整理、提取</small></button>
+            <button class="recipe-card" data-recipe="delegate" data-prompt="把这件事分工给合适的 Agent 并行处理，再汇总交付："><strong>智能分工</strong><small>拆任务、并行、汇总</small></button>
             <button class="recipe-card" data-recipe="decision" data-prompt="帮我判断这件事该不该做，给明确结论和下一步。"><strong>做决策</strong><small>方案、取舍、优先级</small></button>
             <button class="recipe-card" data-recipe="review" data-prompt="帮我审查这个方案，重点找漏洞、风险和遗漏。"><strong>审方案</strong><small>Review、挑错、补缺口</small></button>
             <button class="recipe-card" data-recipe="plan" data-prompt="把这件事拆成可以直接执行的步骤和 To-do。"><strong>拆计划</strong><small>步骤、里程碑、Codex 任务</small></button>
@@ -65,6 +69,8 @@
           <label>任务
             <select id="recipePicker">
               <option value="auto">自动判断</option>
+              <option value="task">小事直办</option>
+              <option value="delegate">智能分工</option>
               <option value="decision">做决策</option>
               <option value="review">审方案</option>
               <option value="plan">拆执行计划</option>
@@ -75,7 +81,7 @@
           <span id="routeHint" aria-live="polite">自动选择最合适的流程</span>
         </div>
         <form id="chatForm" class="composer">
-          <textarea id="chatInput" rows="4" placeholder="直接说你要解决什么…" autofocus></textarea>
+          <textarea id="chatInput" rows="4" placeholder="直接说你要处理什么…" autofocus></textarea>
           <button id="sendButton" type="submit" aria-label="发送">↵</button>
         </form>
         <small>Enter 发送，Shift + Enter 换行</small>
@@ -180,8 +186,32 @@
     <div id="processList" class="process-list"><div class="process-empty">暂无过程。</div></div>
   </aside>
 </div>
+
+<div id="taskDeskBackdrop" class="task-desk-backdrop hidden"></div>
+<aside id="taskDesk" class="task-desk hidden" aria-label="任务台">
+  <header class="task-desk-head">
+    <div><strong>TASK DESK</strong><small>随手记，小事直办，大事分工</small></div>
+    <button id="closeTasksButton" type="button">×</button>
+  </header>
+  <section class="task-capture">
+    <textarea id="taskInput" rows="3" placeholder="记下一件要处理的事…"></textarea>
+    <div class="task-capture-actions">
+      <button id="saveTaskButton" type="button">先记下</button>
+      <button id="runTaskButton" type="button">小事直办</button>
+      <button id="delegateTaskButton" class="task-primary" type="button">智能分工</button>
+    </div>
+  </section>
+  <div class="task-filters">
+    <button class="task-filter active" data-task-filter="open" type="button">待处理 <span id="openTaskCount">0</span></button>
+    <button class="task-filter" data-task-filter="done" type="button">已完成 <span id="doneTaskCount">0</span></button>
+    <button class="task-filter" data-task-filter="all" type="button">全部</button>
+  </div>
+  <div id="taskList" class="task-list"><div class="task-empty">还没有任务。</div></div>
+</aside>
+
 <div id="toast" class="toast hidden"></div>
 <script src="app.js" type="module"></script>
 <script src="ux.js" type="module"></script>
+<script src="tasks.js" type="module"></script>
 </body>
 </html>
