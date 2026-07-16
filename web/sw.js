@@ -1,4 +1,4 @@
-const CACHE = "team-agent-marco-web-v11";
+const CACHE = "team-agent-marco-web-v12";
 const ASSETS = [
   "./",
   "./index.html",
