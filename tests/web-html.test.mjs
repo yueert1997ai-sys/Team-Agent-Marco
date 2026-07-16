@@ -183,19 +183,29 @@ test("workspace UX previews routing and closes the result-to-project loop", asyn
   assert.match(uxCss, /route-preview-ready/);
 });
 
-test("task desk persists work, launches recipes and extracts next steps", async () => {
+test("task desk now tracks a full execution lifecycle", async () => {
   const tasks = await read("web/tasks.js");
   const css = await read("web/tasks.css");
   assert.match(tasks, /RECORD_ID = "task-desk"/);
-  assert.match(tasks, /executeTask/);
-  assert.match(tasks, /preferredRecipe/);
-  assert.match(tasks, /marco-active-task/);
+  assert.match(tasks, /migrateTask/);
+  assert.match(tasks, /priority/);
+  assert.match(tasks, /schedule/);
+  assert.match(tasks, /conversationId/);
+  assert.match(tasks, /resultSummary/);
+  assert.match(tasks, /openTaskResult/);
+  assert.match(tasks, /editTask/);
+  assert.match(tasks, /cyclePriority/);
+  assert.match(tasks, /toggleSchedule/);
+  assert.match(tasks, /document\.getElementById\("newChatButton"\)\?\.click/);
+  assert.match(tasks, /任务完成，结果已关联到任务卡/);
+  assert.match(tasks, /data-task-filter = "today"|dataset\.taskFilter = "today"/);
   assert.match(tasks, /extractNextSteps/);
   assert.match(tasks, /data-task-result-action="extract"/);
   assert.match(tasks, /putRecord\("settings"/);
-  assert.match(css, /\.task-desk/);
+  assert.match(css, /\.task-meta-controls/);
+  assert.match(css, /\.task-result-preview/);
+  assert.match(css, /priority-high/);
   assert.match(css, /\.task-item\.running/);
-  assert.match(css, /recipe-grid-six/);
 });
 
 test("provider final prompt is structured and receives project memory", async () => {
@@ -213,7 +223,7 @@ test("service worker caches only successful responses and all task assets", asyn
   assert.match(source, /ux\.js/);
   assert.match(source, /tasks\.js/);
   assert.match(source, /tasks\.css/);
-  assert.match(source, /web-v11/);
+  assert.match(source, /web-v12/);
 });
 
 test("all web JavaScript files pass syntax checks", async () => {
